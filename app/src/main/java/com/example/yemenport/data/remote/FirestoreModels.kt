@@ -779,3 +779,55 @@ data class FsOfficerProfileSettings(
     @ServerTimestamp val createdAt: Timestamp? = null,
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
+
+@Keep
+@IgnoreExtraProperties
+data class FsTravel(
+    @DocumentId val id: String = "",
+    val travelerId: String = "",
+    val travelerName: String = "",
+    val passportNumber: String = "",
+    val portName: String = "",
+    val direction: String = "مغادرة",
+    val destination: String = "",
+    val travelAllowed: String = "نعم",
+    val clearanceStatus: String = "ALLOWED",
+    val vettingStatus: String = "سليم",
+    val officerName: String = "",
+    val crossedAtEpochMs: Long = 0L,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
+fun TravelEntity.toCreateFirestoreMap(): Map<String, Any> = mapWithoutNulls(
+    "travelerId" to travelerId.ifBlank { id }.take(128),
+    "travelerName" to travelerName.ifBlank { "مسافر" }.take(200),
+    "passportNumber" to passportNumber.take(80),
+    "portName" to portName.ifBlank { "المركز الرئيسي - العاصمة صنعاء" }.take(150),
+    "direction" to direction.ifBlank { "عبور" }.take(40),
+    "destination" to destination.take(120),
+    "travelAllowed" to if (travelAllowed == "لا") "لا" else "نعم",
+    "clearanceStatus" to clearanceStatus.name,
+    "vettingStatus" to vettingStatus.take(150),
+    "officerName" to officerName.take(150),
+    "crossedAtEpochMs" to crossedAt.toEpochMilli(),
+    "createdAt" to FieldValue.serverTimestamp(),
+    "updatedAt" to FieldValue.serverTimestamp()
+)
+
+fun FsTravel.toEntity(): TravelEntity = TravelEntity(
+    id = id,
+    travelerId = travelerId,
+    travelerName = travelerName,
+    passportNumber = passportNumber,
+    portName = portName,
+    direction = direction,
+    destination = destination,
+    travelAllowed = travelAllowed,
+    clearanceStatus = TravelClearanceStatus.fromCode(clearanceStatus),
+    vettingStatus = vettingStatus,
+    officerName = officerName,
+    crossedAt = if (crossedAtEpochMs > 0L) java.time.Instant.ofEpochMilli(crossedAtEpochMs) else java.time.Instant.now(),
+    synced = true,
+    createdAt = createdAt?.toDate()?.time ?: System.currentTimeMillis()
+)

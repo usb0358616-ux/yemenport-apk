@@ -1,10 +1,13 @@
 package com.example.yemenport.ui.screens
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -15,18 +18,24 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.example.yemenport.data.local.TravelClearanceStatus
+import com.example.yemenport.data.local.TravelEntity
 import com.example.yemenport.data.local.TravelerEntity
 import com.example.yemenport.domain.export.SovereignExportEngine
 import com.example.yemenport.ui.OfficerSession
 import com.example.yemenport.ui.theme.SovereignCrimson
 import com.example.yemenport.ui.theme.SovereignEmerald
 import com.example.yemenport.ui.theme.SovereignGold
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun TravelersScreen(
     session: OfficerSession,
     travelers: List<TravelerEntity>,
+    travels: List<TravelEntity> = emptyList(),
     onAddTraveler: (
         fullName: String,
         passportName: String,
@@ -44,15 +53,22 @@ fun TravelersScreen(
         notes: String
     ) -> Unit,
     onDeleteTraveler: (String) -> Unit,
-    onExport: (String) -> Unit
+    onExport: (String) -> Unit,
+    onRecordCrossing: (traveler: TravelerEntity, direction: String, destination: String) -> Unit = { _, _, _ -> },
+    onNavigateToScanner: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var search by remember { mutableStateOf("") }
     var filterMode by remember { mutableStateOf("الكل") }
+    var activeTab by remember { mutableIntStateOf(0) } // 0 = Travelers, 1 = Travel Crossings (TravelEntity)
     var showAddDialog by remember { mutableStateOf(false) }
     var selectedQrTraveler by remember { mutableStateOf<TravelerEntity?>(null) }
+    var selectedDetailTraveler by remember { mutableStateOf<TravelerEntity?>(null) }
 
     val filters = listOf("الكل", "مسموح", "ممنوع / مرتجع", "قريب الانتهاء", "منتهي")
+    val timeFormatter = remember {
+        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault())
+    }
 
     val filtered = remember(search, filterMode, travelers) {
         travelers.filter { t ->
@@ -68,6 +84,24 @@ fun TravelersScreen(
                 "ممنوع / مرتجع" -> t.travelAllowed == "لا" || t.returnReason.isNotBlank() || t.status.contains("مرتجع")
                 "قريب الانتهاء" -> t.passportStatus == "قريب الانتهاء"
                 "منتهي" -> t.passportStatus == "منتهي"
+                else -> true
+            }
+            matchesQuery && matchesFilter
+        }
+    }
+
+    val filteredTravels = remember(search, filterMode, travels) {
+        travels.filter { tr ->
+            val q = search.trim()
+            val matchesQuery = q.isEmpty() ||
+                tr.travelerName.contains(q, true) ||
+                tr.passportNumber.contains(q, true) ||
+                tr.portName.contains(q, true) ||
+                tr.destination.contains(q, true) ||
+                tr.officerName.contains(q, true)
+            val matchesFilter = when (filterMode) {
+                "مسموح" -> tr.clearanceStatus == TravelClearanceStatus.ALLOWED
+                "ممنوع / مرتجع" -> tr.clearanceStatus == TravelClearanceStatus.BLOCKED || tr.clearanceStatus == TravelClearanceStatus.RETURNED
                 else -> true
             }
             matchesQuery && matchesFilter
@@ -119,12 +153,140 @@ fun TravelersScreen(
             }
         }
 
-        if (filtered.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            FilterChip(
+                selected = activeTab == 0,
+                onClick = { activeTab = 0 },
+                label = { Text("سجلات المسافرين (${filtered.size})") },
+                modifier = Modifier.testTag("tab_travelers_list")
+            )
+            FilterChip(
+                selected = activeTab == 1,
+                onClick = { activeTab = 1 },
+                label = { Text("حركات العبور (${filteredTravels.size})") },
+                modifier = Modifier.testTag("tab_travel_crossings")
+            )
+        }
+
+        if (activeTab == 1) {
+            if (filteredTravels.isEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FlightTakeoff,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f),
+                        modifier = Modifier.size(56.dp)
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "لا توجد حركات عبور مسجلة مطابقة حتى الآن.\nاضغط على أي مسافر لتسجيل حركة دخول أو مغادرة.",
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (travelers.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        FilledTonalButton(onClick = { activeTab = 0 }) {
+                            Text("عرض سجل المسافرين")
+                        }
+                    }
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(filteredTravels, key = { it.id }) { tr ->
+                        val statusColor = when (tr.clearanceStatus) {
+                            TravelClearanceStatus.ALLOWED -> SovereignEmerald
+                            TravelClearanceStatus.BLOCKED -> SovereignCrimson
+                            TravelClearanceStatus.RETURNED,
+                            TravelClearanceStatus.PENDING_REVIEW -> SovereignGold
+                        }
+                        ElevatedCard(modifier = Modifier.fillMaxWidth().testTag("travel_crossing_card_${tr.id}")) {
+                            Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(tr.travelerName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                        Text("${tr.direction} • جواز: ${tr.passportNumber.ifBlank { "-" }}", style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                    Surface(
+                                        color = statusColor.copy(alpha = 0.14f),
+                                        shape = MaterialTheme.shapes.small
+                                    ) {
+                                        Text(
+                                            tr.clearanceStatus.arabicLabel,
+                                            color = statusColor,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    "المنفذ: ${tr.portName}${if (tr.destination.isNotBlank()) " → ${tr.destination}" else ""}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    "التاريخ: ${timeFormatter.format(tr.crossedAt)} • الضابط: ${tr.officerName.ifBlank { "المناوب" }}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (tr.flags.isNotEmpty()) {
+                                    Text(
+                                        "علامات: ${tr.flags.joinToString(" • ")}",
+                                        color = SovereignCrimson,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (filtered.isEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PersonSearch,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.65f),
+                    modifier = Modifier.size(56.dp)
+                )
+                Spacer(Modifier.height(10.dp))
                 Text(
-                    "لا توجد سجلات مطابقة. يمكنك إضافة مسافر، المسح بالكاميرا، أو استيراد كشف.",
+                    "لا توجد سجلات مسافرين مطابقة. ابدأ بمسح الجواز بالكاميرا أو الإضافة اليدوية.",
+                    textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = onNavigateToScanner,
+                        modifier = Modifier.heightIn(min = 48.dp).testTag("empty_scan_passport_button")
+                    ) {
+                        Icon(Icons.Default.DocumentScanner, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("مسح جواز الآن")
+                    }
+                    OutlinedButton(
+                        onClick = { showAddDialog = true },
+                        modifier = Modifier.heightIn(min = 48.dp).testTag("empty_manual_add_button")
+                    ) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("تسجيل يدوي")
+                    }
+                }
             }
         } else {
             LazyColumn(
@@ -133,7 +295,12 @@ fun TravelersScreen(
             ) {
                 items(filtered, key = { it.id }) { t ->
                     val blocked = t.travelAllowed == "لا"
-                    ElevatedCard(modifier = Modifier.fillMaxWidth().testTag("traveler_card_${t.id}")) {
+                    ElevatedCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedDetailTraveler = t }
+                            .testTag("traveler_card_${t.id}")
+                    ) {
                         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -241,6 +408,100 @@ fun TravelersScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showAddDialog = false }) { Text("إلغاء") }
+            }
+        )
+    }
+
+    selectedDetailTraveler?.let { t ->
+        var crossingDestination by remember(t.id) { mutableStateOf(t.destination) }
+        val travelerCrossings = remember(t.id, travels) {
+            travels.filter {
+                it.travelerId == t.id || (t.idNumber.isNotBlank() && it.passportNumber == t.idNumber)
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { selectedDetailTraveler = null },
+            title = { Text(t.fullName, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (t.passportName.isNotBlank()) {
+                        Text("الاسم اللاتيني: ${t.passportName}", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Text("رقم الجواز: ${t.idNumber.ifBlank { "-" }} (${t.passportStatus})")
+                    Text("الجنسية: ${t.country} • الجنس: ${t.gender} • الميلاد: ${t.birthDate.ifBlank { "-" }}")
+                    Text("المنفذ: ${t.portName} • التأشيرة: ${t.visaType.ifBlank { "-" }}")
+                    Text("الوكالة: ${t.agency.ifBlank { "-" }} • الوجهة المسجلة: ${t.destination.ifBlank { "-" }}")
+                    Text(
+                        "الحالة الأمنية: ${t.vettingResult.ifBlank { if (t.travelAllowed == "لا") "ممنوع" else "سليم" }}",
+                        color = if (t.travelAllowed == "لا") SovereignCrimson else SovereignEmerald,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (t.additionalInfo.isNotBlank()) {
+                        Text("ملاحظات: ${t.additionalInfo}", style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    HorizontalDivider()
+                    Text("تسجيل حركة عبور جديدة عبر ${session.assignedPort}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                    OutlinedTextField(
+                        value = crossingDestination,
+                        onValueChange = { crossingDestination = it },
+                        label = { Text("الوجهة / بلد القدوم") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = {
+                                onRecordCrossing(t, "دخول", crossingDestination)
+                                selectedDetailTraveler = null
+                            },
+                            modifier = Modifier.weight(1f).testTag("record_entry_crossing_button")
+                        ) {
+                            Text("تسجيل دخول")
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                onRecordCrossing(t, "مغادرة", crossingDestination)
+                                selectedDetailTraveler = null
+                            },
+                            modifier = Modifier.weight(1f).testTag("record_exit_crossing_button")
+                        ) {
+                            Text("تسجيل مغادرة")
+                        }
+                    }
+
+                    if (travelerCrossings.isNotEmpty()) {
+                        HorizontalDivider()
+                        Text("سجل حركات العبور (${travelerCrossings.size}):", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelLarge)
+                        travelerCrossings.take(5).forEach { cr ->
+                            Text(
+                                "• ${cr.direction} (${cr.clearanceStatus.arabicLabel}) — ${cr.portName} • ${timeFormatter.format(cr.crossedAt)}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+
+                    if (t.mergeRecords.isNotEmpty() || t.mergeHistory.isNotBlank()) {
+                        HorizontalDivider()
+                        Text("الخط الزمني للدمج الذكي:", fontWeight = FontWeight.Bold, color = SovereignGold, style = MaterialTheme.typography.labelLarge)
+                        if (t.mergeRecords.isNotEmpty()) {
+                            t.mergeRecords.forEach { rec ->
+                                Text(
+                                    "• ${rec.timestampIso.take(16)} (${rec.officerName}): ${rec.changedFields.joinToString("، ")}",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        } else {
+                            Text(t.mergeHistory, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { selectedDetailTraveler = null }) { Text("إغلاق") }
             }
         )
     }

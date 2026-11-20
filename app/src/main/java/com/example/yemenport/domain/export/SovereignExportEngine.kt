@@ -9,6 +9,7 @@ import android.graphics.pdf.PdfDocument
 import androidx.core.content.FileProvider
 import com.example.yemenport.data.local.TravelerEntity
 import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import java.io.File
 import java.io.FileOutputStream
@@ -23,7 +24,8 @@ object SovereignExportEngine {
 
     fun generateQrBitmap(content: String, sizePx: Int = 360): Bitmap? {
         return runCatching {
-            val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, sizePx, sizePx)
+            val hints = mapOf(EncodeHintType.CHARACTER_SET to "UTF-8")
+            val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
             val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
             for (x in 0 until sizePx) {
                 for (y in 0 until sizePx) {

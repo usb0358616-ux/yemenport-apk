@@ -5,7 +5,9 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.yemenport.core.BiometricAuthAvailability
 import com.example.yemenport.core.BiometricAuthentication
+import com.example.yemenport.core.KeystoreCrypto
 import com.example.yemenport.data.local.*
+import com.example.yemenport.domain.export.SovereignExportEngine
 import com.example.yemenport.domain.mrz.PassportOcrAnalyzer
 import com.example.yemenport.domain.security.WatchlistGuardEngine
 import com.example.yemenport.domain.security.WatchlistMatchSource
@@ -197,5 +199,50 @@ class SovereignDatabaseAndBiometricTest {
         assertTrue(summary.hasActiveWarrantOrBan)
         assertTrue(summary.hits.any { it.source == WatchlistMatchSource.TRAVEL_BAN })
         assertTrue(summary.hits.any { it.source == WatchlistMatchSource.ACTIVE_WARRANT })
+    }
+
+    @Test
+    fun qrCodeGeneratorAndAnalyzer_roundTripsBorderPassPayload() {
+        val payload = "YEM-BORDER|08123456|AHMED ALI|اليمن|ALLOWED:نعم|PORT:مطار عدن الدولي"
+        val bitmap = SovereignExportEngine.generateQrBitmap(payload, sizePx = 320)
+        assertNotNull(bitmap)
+
+        val decoded = PassportOcrAnalyzer.decodeQrFromBitmap(bitmap!!)
+        assertEquals(payload, decoded)
+    }
+
+    @Test
+    fun keystoreCrypto_persistsIdleTimeoutPreferenceSafely() {
+        KeystoreCrypto.saveEncryptedPreference(context, "idle_timeout_minutes", "5")
+        val loaded = KeystoreCrypto.readEncryptedPreference(context, "idle_timeout_minutes", "3")
+        assertEquals("5", loaded)
+    }
+
+    @Test
+    fun borderDao_tracksUnsyncedTravelsAndMarksThemSynced() = runBlocking {
+        val pending = TravelEntity(
+            id = "tr_sync_1",
+            travelerId = "trv_1",
+            travelerName = "سالم ناصر",
+            passportNumber = "09887766",
+            portName = "منفذ شحن البري",
+            direction = "دخول",
+            destination = "مسقط",
+            clearanceStatus = TravelClearanceStatus.ALLOWED,
+            synced = false
+        )
+        dao.upsertTravel(pending)
+        assertEquals(1, dao.getUnsyncedTravels().size)
+
+        dao.markTravelsSynced(listOf("tr_sync_1"))
+        assertEquals(0, dao.getUnsyncedTravels().size)
+    }
+
+    @Test
+    fun mainActivity_launchesWithoutStartupCrash() {
+        val controller = org.robolectric.Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        assertNotNull(activity)
+        controller.pause().stop().destroy()
     }
 }

@@ -45,7 +45,8 @@ fun DashboardScreen(
     onNavigateToImport: () -> Unit,
     onNavigateToTravelers: () -> Unit,
     onNavigateToReports: () -> Unit,
-    onSyncNow: () -> Unit
+    onSyncNow: () -> Unit,
+    onExportShiftReport: () -> Unit = {}
 ) {
     var globalQuery by remember { mutableStateOf("") }
     val matchingTravelers = remember(globalQuery, travelers) {
@@ -155,18 +156,44 @@ fun DashboardScreen(
                         }
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AssistChip(
-                            onClick = {},
-                            label = { Text("أوفلاين 100% (Room SQLite)") },
-                            leadingIcon = {
-                                Icon(Icons.Default.OfflinePin, contentDescription = null, tint = SovereignEmerald, modifier = Modifier.size(18.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(Icons.Default.OfflinePin, contentDescription = null, tint = SovereignEmerald, modifier = Modifier.size(16.dp))
+                                Text("أوفلاين 100%", style = MaterialTheme.typography.labelMedium)
                             }
-                        )
-                        AssistChip(
-                            onClick = {},
-                            label = { Text("${SovereignConstants.YEMEN_PORTS.size} منفذاً سيادياً") }
-                        )
+                        }
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.72f),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text(
+                                "${SovereignConstants.YEMEN_PORTS.size} منفذاً سيادياً",
+                                style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                        OutlinedButton(
+                            onClick = onExportShiftReport,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.heightIn(min = 40.dp).testTag("dashboard_shift_pdf_button")
+                        ) {
+                            Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("تقرير الوردية", style = MaterialTheme.typography.labelLarge)
+                        }
                     }
                 }
             }

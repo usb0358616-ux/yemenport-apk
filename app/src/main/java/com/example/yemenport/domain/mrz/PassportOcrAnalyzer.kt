@@ -10,6 +10,13 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.DecodeHintType
+import com.google.zxing.MultiFormatReader
+import com.google.zxing.PlanarYUVLuminanceSource
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.common.HybridBinarizer
 import kotlinx.coroutines.tasks.await
 import java.time.LocalDate
 import java.time.Period
@@ -54,12 +61,22 @@ data class TravelerDocumentValidation(
 class PassportOcrAnalyzer(
     private val minFrameIntervalMs: Long = 450L,
     private val onMrzDetected: (MrzParseResult) -> Unit = {},
+    private val onQrDetected: (String) -> Unit = {},
     private val onTextObserved: (String) -> Unit = {},
     private val onError: (Throwable) -> Unit = {}
 ) : ImageAnalysis.Analyzer {
 
     private val recognizer: TextRecognizer =
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+
+    private val qrReader = MultiFormatReader().apply {
+        setHints(
+            mapOf(
+                DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE),
+                DecodeHintType.CHARACTER_SET to "UTF-8"
+            )
+        )
+    }
 
     @Volatile
     private var lastProcessedMs: Long = 0L
@@ -75,6 +92,26 @@ class PassportOcrAnalyzer(
         runCatching { recognizer.close() }
     }
 
+    private fun tryDecodeQrFromImageProxy(imageProxy: ImageProxy): String? {
+        return runCatching {
+            val plane = imageProxy.planes.firstOrNull() ?: return null
+            val buffer = plane.buffer
+            val data = ByteArray(buffer.remaining())
+            buffer.get(data)
+            val source = PlanarYUVLuminanceSource(
+                data,
+                plane.rowStride,
+                imageProxy.height,
+                0,
+                0,
+                imageProxy.width.coerceAtMost(plane.rowStride),
+                imageProxy.height,
+                false
+            )
+            qrReader.decodeWithState(BinaryBitmap(HybridBinarizer(source))).text
+        }.getOrNull().also { qrReader.reset() }
+    }
+
     @OptIn(ExperimentalGetImage::class)
     override fun analyze(imageProxy: ImageProxy) {
         val now = System.currentTimeMillis()
@@ -88,6 +125,15 @@ class PassportOcrAnalyzer(
             return
         }
         lastProcessedMs = now
+
+        val qrPayload = tryDecodeQrFromImageProxy(imageProxy)
+        if (!qrPayload.isNullOrBlank()) {
+            locked = true
+            onQrDetected(qrPayload)
+            imageProxy.close()
+            return
+        }
+
         val inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
         recognizer.process(inputImage)
             .addOnSuccessListener { visionText ->
@@ -384,6 +430,23 @@ class PassportOcrAnalyzer(
             } finally {
                 runCatching { recognizer.close() }
             }
+        }
+
+        fun decodeQrFromBitmap(bitmap: Bitmap): String? {
+            return runCatching {
+                val pixels = IntArray(bitmap.width * bitmap.height)
+                bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                val source = RGBLuminanceSource(bitmap.width, bitmap.height, pixels)
+                val reader = MultiFormatReader().apply {
+                    setHints(
+                        mapOf(
+                            DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE),
+                            DecodeHintType.CHARACTER_SET to "UTF-8"
+                        )
+                    )
+                }
+                reader.decode(BinaryBitmap(HybridBinarizer(source))).text
+            }.getOrNull()
         }
     }
 }

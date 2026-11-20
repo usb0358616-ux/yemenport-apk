@@ -289,6 +289,45 @@ class SovereignRepository(
         logAudit("إدارة ضابط منفذ", "PortOfficer", item.id, "${item.rank} ${item.fullName} — ${item.role}", officerName, officerRole, portName)
     }
 
+    suspend fun recordTravelCrossing(
+        traveler: TravelerEntity,
+        direction: String,
+        destination: String,
+        portName: String,
+        officerName: String,
+        officerRole: String
+    ) {
+        val status = TravelClearanceStatus.fromTravelAllowedFlag(traveler.travelAllowed)
+        val travel = TravelEntity(
+            id = "tr_${UUID.randomUUID().toString().replace("-", "").take(16)}",
+            travelerId = traveler.id,
+            travelerName = traveler.fullName,
+            passportNumber = traveler.idNumber,
+            portName = portName,
+            direction = direction,
+            destination = destination,
+            travelAllowed = traveler.travelAllowed,
+            clearanceStatus = status,
+            vettingStatus = traveler.vettingResult,
+            officerName = officerName,
+            flags = traveler.securityFlags,
+            metadata = mapOf("source" to "traveler_detail_quick_log"),
+            synced = false
+        )
+        dao.upsertTravel(travel)
+        logAudit(
+            action = "تسجيل حركة $direction",
+            entityType = "Travel",
+            entityId = travel.id,
+            details = "${traveler.fullName} (جواز: ${traveler.idNumber}) عبر $portName — الحالة: ${status.arabicLabel}",
+            officerName = officerName,
+            officerRole = officerRole,
+            portName = portName,
+            severityLevel = if (status == TravelClearanceStatus.BLOCKED) AuditSeverity.CRITICAL else AuditSeverity.INFO,
+            metadata = mapOf("passport" to traveler.idNumber, "direction" to direction)
+        )
+    }
+
     suspend fun syncWithCloud(userId: String): Result<Pair<Int, Int>> {
         val pushRes = firestoreSync.pushPendingToCloud(userId, dao)
         if (pushRes.isFailure) return Result.failure(pushRes.exceptionOrNull()!!)

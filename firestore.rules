@@ -522,5 +522,43 @@ service cloud.firestore {
                        incoming().diff(existing()).affectedKeys().hasOnly(['officerName', 'officerRole', 'assignedPort', 'biometricEnabled', 'highContrastMode', 'hqCenterName', 'updatedAt']);
       allow delete: if isOwner(userId) && isValidId(settingId);
     }
+
+    // 17. Travel Crossings (TravelEntity)
+    function isValidTravel(data) {
+      return data.travelerId is string && data.travelerId.size() >= 1 && data.travelerId.size() <= 128 &&
+             data.travelerName is string && data.travelerName.size() >= 1 && data.travelerName.size() <= 200 &&
+             data.portName is string && data.portName.size() >= 1 && data.portName.size() <= 150 &&
+             data.travelAllowed in ['نعم', 'لا'] &&
+             data.clearanceStatus in ['ALLOWED', 'BLOCKED', 'PENDING_REVIEW', 'RETURNED'] &&
+             isOptStr(data, 'passportNumber', 80) &&
+             isOptStr(data, 'direction', 40) &&
+             isOptStr(data, 'destination', 120) &&
+             isOptStr(data, 'vettingStatus', 150) &&
+             isOptStr(data, 'officerName', 150) &&
+             (!( 'crossedAtEpochMs' in data ) || (data.crossedAtEpochMs is int && data.crossedAtEpochMs >= 0));
+    }
+
+    match /users/{userId}/travels/{travelId} {
+      allow get: if isOwner(userId) && isValidId(travelId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(travelId) &&
+                       incoming().keys().hasAll(['travelerId', 'travelerName', 'portName', 'travelAllowed', 'clearanceStatus', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly([
+                         'travelerId', 'travelerName', 'passportNumber', 'portName',
+                         'direction', 'destination', 'travelAllowed', 'clearanceStatus',
+                         'vettingStatus', 'officerName', 'crossedAtEpochMs', 'createdAt', 'updatedAt'
+                       ]) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidTravel(incoming());
+      allow update: if isOwner(userId) && isValidId(travelId) &&
+                       isValidTravel(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'travelerId', 'travelerName', 'passportNumber', 'portName',
+                         'direction', 'destination', 'travelAllowed', 'clearanceStatus',
+                         'vettingStatus', 'officerName', 'crossedAtEpochMs', 'updatedAt'
+                       ]);
+      allow delete: if isOwner(userId) && isValidId(travelId);
+    }
   }
 }

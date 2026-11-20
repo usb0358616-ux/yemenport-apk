@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,6 +27,7 @@ import com.example.yemenport.ui.OfficerSession
 import com.example.yemenport.ui.theme.SovereignCrimson
 import com.example.yemenport.ui.theme.SovereignEmerald
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsAndAuditScreen(
     session: OfficerSession,
@@ -36,8 +38,10 @@ fun SettingsAndAuditScreen(
         role: OfficerRole,
         assignedPort: String,
         biometricEnabled: Boolean,
-        highContrastMode: Boolean
+        highContrastMode: Boolean,
+        idleTimeoutMinutes: Int
     ) -> Unit,
+    onLockNow: () -> Unit = {},
     onAddOfficer: (String, String, String, String, Boolean) -> Unit,
     onSyncNow: () -> Unit,
     onSignOut: () -> Unit
@@ -46,6 +50,9 @@ fun SettingsAndAuditScreen(
     var officerName by remember(session.officerName) { mutableStateOf(session.officerName) }
     var selectedRole by remember(session.role) { mutableStateOf(session.role) }
     var selectedPort by remember(session.assignedPort) { mutableStateOf(session.assignedPort) }
+    var selectedIdleMinutes by remember(session.idleTimeoutMinutes) { mutableIntStateOf(session.idleTimeoutMinutes) }
+    var portQuery by remember(session.assignedPort) { mutableStateOf("") }
+    var portDropdownExpanded by remember { mutableStateOf(false) }
 
     var newRank by remember { mutableStateOf("نقيب") }
     var newOffName by remember { mutableStateOf("") }
@@ -53,10 +60,21 @@ fun SettingsAndAuditScreen(
 
     val biometricAuth = remember { BiometricAuthentication() }
 
+    val filteredPorts = remember(portQuery) {
+        val q = portQuery.trim()
+        if (q.isEmpty()) SovereignConstants.YEMEN_PORTS
+        else SovereignConstants.YEMEN_PORTS.filter {
+            it.name.contains(q, ignoreCase = true) ||
+                it.governorate.contains(q, ignoreCase = true) ||
+                it.type.contains(q, ignoreCase = true) ||
+                it.code.contains(q, ignoreCase = true)
+        }
+    }
+
     fun verifyBiometricAndToggle(enable: Boolean) {
         val activity = context as? FragmentActivity
         if (!enable || activity == null || !biometricAuth.canAuthenticate(context)) {
-            onUpdateSession(officerName, selectedRole, selectedPort, enable, session.highContrastMode)
+            onUpdateSession(officerName, selectedRole, selectedPort, enable, session.highContrastMode, selectedIdleMinutes)
             return
         }
 
@@ -65,7 +83,7 @@ fun SettingsAndAuditScreen(
             title = "تأكيد الهوية بالبصمة",
             subtitle = "تفعيل القفل التلقائي عند الفتح وبعد الخمول",
             onSuccess = {
-                onUpdateSession(officerName, selectedRole, selectedPort, true, session.highContrastMode)
+                onUpdateSession(officerName, selectedRole, selectedPort, true, session.highContrastMode, selectedIdleMinutes)
                 Toast.makeText(context, "تم تفعيل قفل البصمة الميداني (عند الفتح وبعد الخمول)", Toast.LENGTH_SHORT).show()
             },
             onFailed = {
@@ -110,14 +128,49 @@ fun SettingsAndAuditScreen(
                         }
                     }
 
-                    Text("المنفذ المعين:", style = MaterialTheme.typography.labelLarge)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(SovereignConstants.PORT_NAMES.take(10)) { p ->
-                            FilterChip(
-                                selected = selectedPort == p,
-                                onClick = { selectedPort = p },
-                                label = { Text(p) }
+                    Text("المنفذ المعين (جميع الـ ${SovereignConstants.YEMEN_PORTS.size} منفذاً):", style = MaterialTheme.typography.labelLarge)
+                    ExposedDropdownMenuBox(
+                        expanded = portDropdownExpanded,
+                        onExpandedChange = { portDropdownExpanded = !portDropdownExpanded },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = selectedPort,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("اختر المنفذ الميداني") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = portDropdownExpanded) },
+                            modifier = Modifier
+                                .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true)
+                                .fillMaxWidth()
+                                .testTag("port_selector_field")
+                        )
+                        ExposedDropdownMenu(
+                            expanded = portDropdownExpanded,
+                            onDismissRequest = { portDropdownExpanded = false }
+                        ) {
+                            OutlinedTextField(
+                                value = portQuery,
+                                onValueChange = { portQuery = it },
+                                label = { Text("تصفية المنافذ (الاسم، المحافظة، النوع)...") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
                             )
+                            filteredPorts.forEach { port ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(port.name, fontWeight = if (port.name == selectedPort) FontWeight.Bold else FontWeight.Normal)
+                                            Text("${port.type} • ${port.governorate} (${port.code})", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    },
+                                    onClick = {
+                                        selectedPort = port.name
+                                        portQuery = ""
+                                        portDropdownExpanded = false
+                                    }
+                                )
+                            }
                         }
                     }
 
@@ -130,7 +183,7 @@ fun SettingsAndAuditScreen(
                         Switch(
                             checked = session.highContrastMode,
                             onCheckedChange = { dark ->
-                                onUpdateSession(officerName, selectedRole, selectedPort, session.biometricEnabled, dark)
+                                onUpdateSession(officerName, selectedRole, selectedPort, session.biometricEnabled, dark, selectedIdleMinutes)
                             },
                             modifier = Modifier.testTag("dark_mode_switch")
                         )
@@ -149,9 +202,34 @@ fun SettingsAndAuditScreen(
                         )
                     }
 
+                    Text("مهلة قفل البصمة بعد الخمول:", style = MaterialTheme.typography.labelLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        listOf(1, 3, 5).forEach { mins ->
+                            FilterChip(
+                                selected = selectedIdleMinutes == mins,
+                                onClick = {
+                                    selectedIdleMinutes = mins
+                                    onUpdateSession(officerName, selectedRole, selectedPort, session.biometricEnabled, session.highContrastMode, mins)
+                                },
+                                label = { Text("$mins د") },
+                                modifier = Modifier.testTag("idle_timeout_${mins}m_chip")
+                            )
+                        }
+                        Spacer(Modifier.weight(1f))
+                        OutlinedButton(
+                            onClick = onLockNow,
+                            enabled = session.biometricEnabled,
+                            modifier = Modifier.testTag("lock_session_now_button")
+                        ) {
+                            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("قفل الآن")
+                        }
+                    }
+
                     Button(
                         onClick = {
-                            onUpdateSession(officerName, selectedRole, selectedPort, session.biometricEnabled, session.highContrastMode)
+                            onUpdateSession(officerName, selectedRole, selectedPort, session.biometricEnabled, session.highContrastMode, selectedIdleMinutes)
                         },
                         modifier = Modifier.fillMaxWidth().testTag("save_profile_settings_button")
                     ) {
@@ -241,7 +319,7 @@ fun SettingsAndAuditScreen(
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = SovereignCrimson),
                     modifier = Modifier.weight(1f).height(48.dp).testTag("sign_out_button")
                 ) {
-                    Icon(Icons.Default.Logout, contentDescription = null)
+                    Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = null)
                     Spacer(Modifier.width(6.dp))
                     Text("تسجيل الخروج")
                 }

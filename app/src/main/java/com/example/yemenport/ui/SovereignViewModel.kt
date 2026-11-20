@@ -7,8 +7,10 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.yemenport.core.BiometricAuthentication
+import com.example.yemenport.core.KeystoreCrypto
 import com.example.yemenport.core.OfficerRole
 import com.example.yemenport.data.local.*
+import com.example.yemenport.data.remote.SovereignSyncScheduler
 import com.example.yemenport.data.repository.SovereignRepository
 import com.example.yemenport.domain.ai.AiDocumentExtraction
 import com.example.yemenport.domain.ai.SovereignAiRepository
@@ -39,7 +41,8 @@ data class OfficerSession(
     val assignedPort: String = "المركز الرئيسي - العاصمة صنعاء",
     val biometricEnabled: Boolean = false,
     val highContrastMode: Boolean = false,
-    val hqCenterName: String = "مصلحة الهجرة والجوازات — صنعاء"
+    val hqCenterName: String = "مصلحة الهجرة والجوازات — صنعاء",
+    val idleTimeoutMinutes: Int = 3
 )
 
 data class DashboardKpis(
@@ -57,10 +60,16 @@ data class DashboardKpis(
 class SovereignViewModel(
     private val repository: SovereignRepository,
     private val aiRepository: SovereignAiRepository,
-    private val currentUserId: String
+    private val currentUserId: String,
+    private val appContext: Context? = null
 ) : ViewModel() {
 
-    private val _session = MutableStateFlow(OfficerSession())
+    private val initialTimeoutMinutes: Int = appContext?.let {
+        KeystoreCrypto.readEncryptedPreference(it, PREF_IDLE_TIMEOUT_MIN, "3")
+            .toIntOrNull()?.coerceIn(1, 15)
+    } ?: 3
+
+    private val _session = MutableStateFlow(OfficerSession(idleTimeoutMinutes = initialTimeoutMinutes))
     val session: StateFlow<OfficerSession> = _session.asStateFlow()
 
     val travelers: StateFlow<List<TravelerEntity>> = repository.travelers
@@ -121,7 +130,8 @@ class SovereignViewModel(
                     assignedPort = fs.assignedPort.ifBlank { _session.value.assignedPort },
                     biometricEnabled = fs.biometricEnabled,
                     highContrastMode = fs.highContrastMode,
-                    hqCenterName = fs.hqCenterName.ifBlank { _session.value.hqCenterName }
+                    hqCenterName = fs.hqCenterName.ifBlank { _session.value.hqCenterName },
+                    idleTimeoutMinutes = _session.value.idleTimeoutMinutes
                 )
                 _session.value = updated
                 if (!hasCheckedStartupLock && updated.biometricEnabled) {
@@ -150,8 +160,14 @@ class SovereignViewModel(
         reports,
         seizures,
         movements,
-        combine(mofaVisas, permits) { m, p -> m.size to p.size }
-    ) { trv, rep, sz, mov, (mofaCount, permitCount) ->
+        combine(mofaVisas, permits, travels, auditLogs) { m, p, tr, logs ->
+            listOf(m.size, p.size, tr.count { !it.synced }, logs.count { !it.synced })
+        }
+    ) { trv, rep, sz, mov, extra ->
+        val mofaCount = extra[0]
+        val permitCount = extra[1]
+        val unsyncedTravels = extra[2]
+        val unsyncedLogs = extra[3]
         DashboardKpis(
             totalTravelers = trv.size,
             allowedCount = trv.count { it.travelAllowed == "نعم" },
@@ -161,7 +177,7 @@ class SovereignViewModel(
             activePatrolsCount = mov.count { it.status == "في مهمة" },
             mofaRequestsCount = mofaCount,
             activePermitsCount = permitCount,
-            unsyncedCount = trv.count { !it.synced } + rep.count { !it.synced } + sz.count { !it.synced }
+            unsyncedCount = trv.count { !it.synced } + rep.count { !it.synced } + sz.count { !it.synced } + unsyncedTravels + unsyncedLogs
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), DashboardKpis())
 
@@ -211,7 +227,7 @@ class SovereignViewModel(
 
     fun checkIdleTimeout(
         nowMs: Long = System.currentTimeMillis(),
-        timeoutMs: Long = BiometricAuthentication.DEFAULT_IDLE_TIMEOUT_MS
+        timeoutMs: Long = _session.value.idleTimeoutMinutes * 60_000L
     ) {
         if (_session.value.biometricEnabled && !_isBiometricLocked.value) {
             if (nowMs - lastActivityMs >= timeoutMs) {
@@ -231,15 +247,26 @@ class SovereignViewModel(
         lastActivityMs = nowMs
     }
 
+    private fun enqueueBackgroundSync() {
+        appContext?.let { ctx ->
+            runCatching { SovereignSyncScheduler.enqueueImmediateSync(ctx) }
+        }
+    }
+
     fun updateSession(
         officerName: String = _session.value.officerName,
         role: OfficerRole = _session.value.role,
         assignedPort: String = _session.value.assignedPort,
         biometricEnabled: Boolean = _session.value.biometricEnabled,
         highContrastMode: Boolean = _session.value.highContrastMode,
-        hqCenterName: String = _session.value.hqCenterName
+        hqCenterName: String = _session.value.hqCenterName,
+        idleTimeoutMinutes: Int = _session.value.idleTimeoutMinutes
     ) {
-        val next = OfficerSession(officerName, role, assignedPort, biometricEnabled, highContrastMode, hqCenterName)
+        val safeMinutes = idleTimeoutMinutes.coerceIn(1, 15)
+        appContext?.let {
+            KeystoreCrypto.saveEncryptedPreference(it, PREF_IDLE_TIMEOUT_MIN, safeMinutes.toString())
+        }
+        val next = OfficerSession(officerName, role, assignedPort, biometricEnabled, highContrastMode, hqCenterName, safeMinutes)
         _session.value = next
         if (!biometricEnabled) {
             _isBiometricLocked.value = false
@@ -266,8 +293,9 @@ class SovereignViewModel(
             _isSyncing.value = false
             res.onSuccess { (pushed, pulled) ->
                 _statusBanner.value = "اكتملت المزامنة السحابية: رفع $pushed سجل، تحديث $pulled سجل"
-            }.onFailure { err ->
-                _statusBanner.value = "تعذر المزامنة حالياً (البيانات محفوظة محلياً): ${err.localizedMessage ?: "غير متصل"}"
+            }.onFailure {
+                enqueueBackgroundSync()
+                _statusBanner.value = "غير متصل حالياً: تمت جدولة المزامنة التلقائية عبر WorkManager فور توفر الإنترنت"
             }
         }
     }
@@ -309,6 +337,7 @@ class SovereignViewModel(
                     severityLevel = AuditSeverity.CRITICAL,
                     metadata = mapOf("passport" to passport, "hits" to summary.hits.size.toString())
                 )
+                enqueueBackgroundSync()
             }
         }
     }
@@ -331,8 +360,43 @@ class SovereignViewModel(
         )
     }
 
+    fun onQrPayloadDetected(context: Context, payload: String) {
+        val parts = payload.split("|")
+        if (parts.firstOrNull() == "YEM-BORDER" && parts.size >= 4) {
+            val passport = parts.getOrNull(1).orEmpty().trim()
+            val name = parts.getOrNull(2).orEmpty().trim()
+            val country = parts.getOrNull(3).orEmpty().ifBlank { "اليمن" }
+            val mrz = MrzParseResult(
+                format = "QR-PASS",
+                passportNumber = passport,
+                passportCheckValid = passport.isNotBlank(),
+                fullLatinName = name,
+                nationalityArabic = country,
+                rawOcrText = payload
+            )
+            _scannedMrz.value = mrz
+            val alert = checkWatchlistAndAlert(context, name, passport, name)
+            _statusBanner.value = if (alert.isCritical) {
+                "🚨 تنبيه أمني على رمز QR للبطاقة: $name ($passport)"
+            } else {
+                "✓ تم التحقق من بطاقة QR: $name ($passport)"
+            }
+        } else {
+            val parsed = PassportOcrAnalyzer.extractPassportFieldsFromText(payload)
+            onMrzDetected(context, parsed)
+            _statusBanner.value = "تمت قراءة رمز QR واستخراج بياناته"
+        }
+    }
+
     fun scanGalleryBitmap(context: Context, bitmap: Bitmap) {
         viewModelScope.launch {
+            val qr = withContext(Dispatchers.Default) {
+                PassportOcrAnalyzer.decodeQrFromBitmap(bitmap)
+            }
+            if (!qr.isNullOrBlank()) {
+                onQrPayloadDetected(context, qr)
+                return@launch
+            }
             val raw = withContext(Dispatchers.Default) {
                 PassportOcrAnalyzer.recognizeBitmap(bitmap)
             }
@@ -420,6 +484,23 @@ class SovereignViewModel(
             } else {
                 "تم حفظ سجل المسافر ${saved.fullName} بنجاح"
             }
+            enqueueBackgroundSync()
+        }
+    }
+
+    fun recordTravelCrossing(traveler: TravelerEntity, direction: String, destination: String) {
+        val s = _session.value
+        viewModelScope.launch {
+            repository.recordTravelCrossing(
+                traveler = traveler,
+                direction = direction,
+                destination = destination,
+                portName = s.assignedPort,
+                officerName = s.officerName,
+                officerRole = s.role.arabicTitle
+            )
+            enqueueBackgroundSync()
+            _statusBanner.value = "تم تسجيل حركة $direction للمسافر ${traveler.fullName}"
         }
     }
 
@@ -431,6 +512,7 @@ class SovereignViewModel(
         }
         viewModelScope.launch {
             repository.deleteTraveler(currentUserId, id, s.officerName, s.role.arabicTitle, s.assignedPort)
+            enqueueBackgroundSync()
             _statusBanner.value = "تم حذف السجل وتوثيق العملية في سجل التدقيق"
         }
     }
@@ -507,6 +589,7 @@ class SovereignViewModel(
             _stagedBatch.value = null
             _stagedFiles.value = emptyList()
             _statusBanner.value = "تم ترحيل ${res.committedCount} سجل إلى ${res.targetCategory.arabicTitle}"
+            enqueueBackgroundSync()
         }
     }
 
@@ -528,6 +611,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -539,6 +623,7 @@ class SovereignViewModel(
         }
         viewModelScope.launch {
             repository.saveReport(report.copy(status = newStatus), s.officerName, s.role.arabicTitle, s.assignedPort)
+            enqueueBackgroundSync()
         }
     }
 
@@ -581,6 +666,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -596,6 +682,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -615,6 +702,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -635,6 +723,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -654,6 +743,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -672,6 +762,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -690,6 +781,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -706,6 +798,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -723,6 +816,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -741,6 +835,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -757,6 +852,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -776,6 +872,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -797,6 +894,7 @@ class SovereignViewModel(
                 ),
                 s.officerName, s.role.arabicTitle, s.assignedPort
             )
+            enqueueBackgroundSync()
         }
     }
 
@@ -821,8 +919,55 @@ class SovereignViewModel(
         }
     }
 
+    fun exportShiftSummaryPdf(context: Context) {
+        val s = _session.value
+        val curKpis = kpis.value
+        val curTravels = travels.value
+        val curReports = reports.value
+        val curLogs = auditLogs.value
+        viewModelScope.launch {
+            val file = withContext(Dispatchers.IO) {
+                val lines = buildList {
+                    add("المركز: ${s.hqCenterName}")
+                    add("المنفذ النشط: ${s.assignedPort}")
+                    add("الضابط المناوب: ${s.officerName} (${s.role.arabicTitle})")
+                    add("التاريخ: ${LocalDate.now()}")
+                    add("--------------------------------------------------")
+                    add("إجمالي المسافرين المسجلين: ${curKpis.totalTravelers}")
+                    add("حركات العبور الموثقة: ${curTravels.size}")
+                    add("المسموح لهم بالعبور: ${curKpis.allowedCount}")
+                    add("الممنوعون / المرتجعون: ${curKpis.blockedOrReturnedCount}")
+                    add("البلاغات والتعميمات النشطة: ${curKpis.activeReportsCount}")
+                    add("الجوازات المضبوطة: ${curKpis.seizedPassportsCount}")
+                    add("الدوريات النشطة: ${curKpis.activePatrolsCount} | تصاريح التنقل: ${curKpis.activePermitsCount}")
+                    add("السجلات بانتظار المزامنة (Offline Queue): ${curKpis.unsyncedCount}")
+                    add("--------------------------------------------------")
+                    add("أحدث حركات العبور:")
+                    curTravels.take(15).forEachIndexed { idx, tr ->
+                        add("${idx + 1}. ${tr.travelerName} | جواز: ${tr.passportNumber} | ${tr.direction} | ${tr.clearanceStatus.arabicLabel}")
+                    }
+                    add("--------------------------------------------------")
+                    add("أبرز البلاغات وسجل التدقيق:")
+                    curReports.take(10).forEachIndexed { idx, r ->
+                        add("${idx + 1}. ${r.title} (${r.status}) — ${r.targetName}")
+                    }
+                    curLogs.take(10).forEach { log ->
+                        add("• [${log.severityLevel.arabicLabel}] ${log.action}: ${log.details}")
+                    }
+                }
+                SovereignExportEngine.exportSummaryPdf(
+                    context = context,
+                    title = "تقرير وردية المنفذ اليومي — ${s.assignedPort}",
+                    lines = lines
+                )
+            }
+            SovereignExportEngine.shareFile(context, file, "application/pdf")
+        }
+    }
+
     private companion object {
         const val TAG = "SovereignVM"
         const val STOP_TIMEOUT_MS = 5000L
+        const val PREF_IDLE_TIMEOUT_MIN = "idle_timeout_minutes"
     }
 }

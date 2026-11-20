@@ -270,3 +270,42 @@ test("Specialized sovereign collections: seizures, permits, mofa_visas, companie
     })
   );
 });
+
+test("Travel crossings (travels): owner CRUD valid, invalid status or cross-user rejected", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
+  const now = new Date(Date.now() - 2000);
+
+  await assertSucceeds(
+    aliceDb.collection(`users/${ALICE_UID}/travels`).doc("tr_001").set({
+      travelerId: "trv_001",
+      travelerName: "أحمد علي المنصور",
+      passportNumber: "08123456",
+      portName: "منفذ الوديعة البري",
+      direction: "مغادرة",
+      destination: "جدة",
+      travelAllowed: "نعم",
+      clearanceStatus: "ALLOWED",
+      vettingStatus: "سليم",
+      officerName: "نقيب علي",
+      crossedAtEpochMs: Date.now() - 2000,
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  await assertFails(
+    aliceDb.collection(`users/${ALICE_UID}/travels`).doc("tr_invalid").set({
+      travelerId: "trv_001",
+      travelerName: "أحمد علي المنصور",
+      portName: "منفذ الوديعة البري",
+      travelAllowed: "نعم",
+      clearanceStatus: "UNKNOWN_STATUS",
+      createdAt: now,
+      updatedAt: now,
+    })
+  );
+
+  await assertFails(bobDb.collection(`users/${ALICE_UID}/travels`).get());
+});
+

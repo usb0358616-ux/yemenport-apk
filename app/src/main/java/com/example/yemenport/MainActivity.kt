@@ -133,7 +133,8 @@ private fun AuthenticatedBorderApp(
                 SovereignViewModel(
                     repository = repo,
                     aiRepository = SovereignAiRepository(),
-                    currentUserId = currentUserId
+                    currentUserId = currentUserId,
+                    appContext = app.applicationContext
                 )
             }
         }
@@ -143,6 +144,7 @@ private fun AuthenticatedBorderApp(
     val cloudState by viewModel.cloudProfileState.collectAsStateWithLifecycle()
     val kpis by viewModel.kpis.collectAsStateWithLifecycle()
     val travelers by viewModel.travelers.collectAsStateWithLifecycle()
+    val travels by viewModel.travels.collectAsStateWithLifecycle()
     val reports by viewModel.reports.collectAsStateWithLifecycle()
     val movements by viewModel.movements.collectAsStateWithLifecycle()
     val seizures by viewModel.seizures.collectAsStateWithLifecycle()
@@ -303,7 +305,8 @@ private fun AuthenticatedBorderApp(
                                 moduleTab = SovereignModuleTab.REPORTS
                                 currentDest = MainDestination.MODULES
                             },
-                            onSyncNow = { viewModel.syncCloudNow() }
+                            onSyncNow = { viewModel.syncCloudNow() },
+                            onExportShiftReport = { viewModel.exportShiftSummaryPdf(context) }
                         )
 
                         MainDestination.SCANNER -> ScannerScreen(
@@ -312,6 +315,7 @@ private fun AuthenticatedBorderApp(
                             aiState = aiState,
                             criticalAlert = criticalAlert,
                             onMrzDetected = { viewModel.onMrzDetected(context, it) },
+                            onQrDetected = { viewModel.onQrPayloadDetected(context, it) },
                             onScanBitmap = { viewModel.scanGalleryBitmap(context, it) },
                             onAnalyzeWithGemini = { viewModel.analyzeBitmapWithGemini(context, it) },
                             onCheckWatchlist = { n, p, l -> viewModel.checkWatchlistAndAlert(context, n, p, l) },
@@ -324,11 +328,14 @@ private fun AuthenticatedBorderApp(
                         MainDestination.TRAVELERS -> TravelersScreen(
                             session = session,
                             travelers = travelers,
+                            travels = travels,
                             onAddTraveler = { fn, pn, idn, co, ge, bd, ex, port, ag, vt, dst, ta, rr, nt ->
                                 viewModel.registerTraveler(context, fn, pn, idn, co, ge, bd, ex, port, ag, vt, dst, ta, rr, nt)
                             },
                             onDeleteTraveler = { viewModel.deleteTraveler(it) },
-                            onExport = { viewModel.exportAndShareTravelers(context, it) }
+                            onExport = { viewModel.exportAndShareTravelers(context, it) },
+                            onRecordCrossing = { trv, dir, dst -> viewModel.recordTravelCrossing(trv, dir, dst) },
+                            onNavigateToScanner = { currentDest = MainDestination.SCANNER }
                         )
 
                         MainDestination.IMPORT -> CentralImportScreen(
@@ -380,9 +387,17 @@ private fun AuthenticatedBorderApp(
                             session = session,
                             officers = officers,
                             auditLogs = auditLogs,
-                            onUpdateSession = { name, role, port, bio, dark ->
-                                viewModel.updateSession(name, role, port, bio, dark)
+                            onUpdateSession = { name, role, port, bio, dark, timeoutMin ->
+                                viewModel.updateSession(
+                                    officerName = name,
+                                    role = role,
+                                    assignedPort = port,
+                                    biometricEnabled = bio,
+                                    highContrastMode = dark,
+                                    idleTimeoutMinutes = timeoutMin
+                                )
                             },
+                            onLockNow = { viewModel.lockSession() },
                             onAddOfficer = { rk, nm, pt, rl, dt -> viewModel.addOfficer(rk, nm, pt, rl, dt) },
                             onSyncNow = { viewModel.syncCloudNow() },
                             onSignOut = {

@@ -9,14 +9,17 @@ import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -24,7 +27,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -41,6 +48,7 @@ import com.example.yemenport.ui.UiState
 import com.example.yemenport.ui.theme.SovereignCrimson
 import com.example.yemenport.ui.theme.SovereignEmerald
 import com.example.yemenport.ui.theme.SovereignGold
+import kotlinx.coroutines.delay
 import java.util.concurrent.Executors
 
 @Composable
@@ -50,6 +58,7 @@ fun ScannerScreen(
     aiState: UiState<AiDocumentExtraction>?,
     criticalAlert: WatchlistCheckSummary?,
     onMrzDetected: (MrzParseResult) -> Unit,
+    onQrDetected: (String) -> Unit = {},
     onScanBitmap: (Bitmap) -> Unit,
     onAnalyzeWithGemini: (Bitmap) -> Unit,
     onCheckWatchlist: (String, String, String) -> WatchlistCheckSummary,
@@ -81,6 +90,8 @@ fun ScannerScreen(
         )
     }
     var cameraActive by remember { mutableStateOf(false) }
+    var torchEnabled by remember { mutableStateOf(false) }
+    var boundCamera by remember { mutableStateOf<Camera?>(null) }
     var liveOcrPreview by remember { mutableStateOf("") }
     var lastSelectedBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
@@ -158,14 +169,39 @@ fun ScannerScreen(
                 onMrzDetected(res)
                 cameraActive = false
             },
+            onQrDetected = { payload ->
+                onQrDetected(payload)
+                cameraActive = false
+            },
             onTextObserved = { txt ->
                 liveOcrPreview = txt.take(180)
             }
         )
     }
 
+    LaunchedEffect(cameraActive, torchEnabled, boundCamera) {
+        if (!cameraActive) {
+            torchEnabled = false
+        }
+        runCatching {
+            boundCamera?.cameraControl?.enableTorch(cameraActive && torchEnabled)
+        }
+    }
+
+    LaunchedEffect(passportNumber, fullNameArabic) {
+        val cleanPass = passportNumber.trim()
+        val cleanName = fullNameArabic.trim()
+        if (cleanPass.length >= 6 || cleanName.length >= 5) {
+            delay(500L)
+            onCheckWatchlist(cleanName, cleanPass, passportNameLatin.trim())
+        }
+    }
+
     DisposableEffect(analyzer) {
-        onDispose { analyzer.close() }
+        onDispose {
+            runCatching { boundCamera?.cameraControl?.enableTorch(false) }
+            analyzer.close()
+        }
     }
 
     Column(
@@ -207,9 +243,9 @@ fun ScannerScreen(
             }
         }
 
-        // CameraX Live Viewfinder
+        // CameraX Live Viewfinder with MRZ / QR alignment guide & Torch
         if (cameraActive && hasCameraPermission) {
-            ElevatedCard(modifier = Modifier.fillMaxWidth().height(250.dp)) {
+            ElevatedCard(modifier = Modifier.fillMaxWidth().height(270.dp)) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     val executor = remember { Executors.newSingleThreadExecutor() }
                     DisposableEffect(Unit) {
@@ -230,24 +266,86 @@ fun ScannerScreen(
                                     .also { it.setAnalyzer(executor, analyzer) }
                                 runCatching {
                                     provider.unbindAll()
-                                    provider.bindToLifecycle(
+                                    val cam = provider.bindToLifecycle(
                                         lifecycleOwner,
                                         CameraSelector.DEFAULT_BACK_CAMERA,
                                         preview,
                                         imageAnalysis
                                     )
+                                    boundCamera = cam
+                                    cam.cameraControl.enableTorch(torchEnabled)
                                 }
                             }, ContextCompat.getMainExecutor(ctx))
                             previewView
                         },
                         modifier = Modifier.fillMaxSize()
                     )
+
+                    // Visual MRZ / QR Alignment Guide Overlay
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val padX = size.width * 0.08f
+                        val guideW = size.width - padX * 2f
+                        val guideTop = size.height * 0.20f
+                        val guideH = size.height * 0.56f
+                        val corner = 24.dp.toPx()
+                        val stroke = 3.dp.toPx()
+
+                        // Outer framing box
+                        drawRect(
+                            color = SovereignGold.copy(alpha = 0.25f),
+                            topLeft = Offset(padX, guideTop),
+                            size = Size(guideW, guideH),
+                            style = Stroke(width = 1.5.dp.toPx())
+                        )
+
+                        // Bottom MRZ target zone band
+                        val mrzTop = guideTop + guideH * 0.65f
+                        drawRect(
+                            color = SovereignGold.copy(alpha = 0.14f),
+                            topLeft = Offset(padX + 6f, mrzTop),
+                            size = Size(guideW - 12f, guideH * 0.30f)
+                        )
+
+                        // Corner brackets (Top-Left, Top-Right, Bottom-Left, Bottom-Right)
+                        drawLine(SovereignGold, Offset(padX, guideTop), Offset(padX + corner, guideTop), stroke, StrokeCap.Round)
+                        drawLine(SovereignGold, Offset(padX, guideTop), Offset(padX, guideTop + corner), stroke, StrokeCap.Round)
+
+                        drawLine(SovereignGold, Offset(padX + guideW, guideTop), Offset(padX + guideW - corner, guideTop), stroke, StrokeCap.Round)
+                        drawLine(SovereignGold, Offset(padX + guideW, guideTop), Offset(padX + guideW, guideTop + corner), stroke, StrokeCap.Round)
+
+                        val bottomY = guideTop + guideH
+                        drawLine(SovereignGold, Offset(padX, bottomY), Offset(padX + corner, bottomY), stroke, StrokeCap.Round)
+                        drawLine(SovereignGold, Offset(padX, bottomY), Offset(padX, bottomY - corner), stroke, StrokeCap.Round)
+
+                        drawLine(SovereignGold, Offset(padX + guideW, bottomY), Offset(padX + guideW - corner, bottomY), stroke, StrokeCap.Round)
+                        drawLine(SovereignGold, Offset(padX + guideW, bottomY), Offset(padX + guideW, bottomY - corner), stroke, StrokeCap.Round)
+                    }
+
+                    // Torch Toggle
+                    IconButton(
+                        onClick = { torchEnabled = !torchEnabled },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(10.dp)
+                            .size(48.dp)
+                            .background(Color.Black.copy(alpha = 0.55f), CircleShape)
+                            .testTag("scanner_torch_button")
+                    ) {
+                        Icon(
+                            imageVector = if (torchEnabled) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                            contentDescription = if (torchEnabled) "إطفاء الفلاش" else "تشغيل الفلاش",
+                            tint = if (torchEnabled) SovereignGold else Color.White
+                        )
+                    }
+
                     Surface(
-                        color = Color.Black.copy(alpha = 0.6f),
+                        color = Color.Black.copy(alpha = 0.65f),
                         modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     ) {
                         Text(
-                            text = if (liveOcrPreview.isBlank()) "وجّه الكاميرا نحو سطر MRZ أسفل الجواز (P<YEM...)" else liveOcrPreview,
+                            text = if (liveOcrPreview.isBlank()) {
+                                "ضع سطرَي MRZ أسفل الجواز أو رمز QR داخل الإطار الذهبي"
+                            } else liveOcrPreview,
                             color = Color.White,
                             style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier.padding(8.dp)
@@ -281,23 +379,46 @@ fun ScannerScreen(
 
         // MRZ Verification Status Card
         if (scannedMrz != null) {
+            val validation = remember(scannedMrz) {
+                PassportOcrAnalyzer.validateTravelerDocument(scannedMrz)
+            }
             ElevatedCard(
                 colors = CardDefaults.cardColors(
-                    containerColor = if (scannedMrz.allChecksPassed) SovereignEmerald.copy(alpha = 0.12f)
+                    containerColor = if (validation.isPassportValid && scannedMrz.allChecksPassed) SovereignEmerald.copy(alpha = 0.12f)
                     else MaterialTheme.colorScheme.surfaceVariant
                 ),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        "نتيجة القراءة الآلية (${scannedMrz.format}) • العمر المحسوب: ${scannedMrz.age} سنة • حالة الجواز: ${scannedMrz.passportStatus}",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "نتيجة القراءة الآلية (${scannedMrz.format}) • العمر المحسوب: ${scannedMrz.age} سنة • حالة الجواز: ${scannedMrz.passportStatus}",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = {
+                                analyzer.resetLock()
+                                liveOcrPreview = ""
+                                cameraActive = true
+                            },
+                            modifier = Modifier.testTag("scanner_rescan_button")
+                        ) {
+                            Text("إعادة المسح")
+                        }
+                    }
                     Text(
                         "Check Digits -> الجواز: ${if (scannedMrz.passportCheckValid) "صحيح ✓" else "تحقق يدوياً"} | الميلاد: ${if (scannedMrz.birthCheckValid) "صحيح ✓" else "-"} | الانتهاء: ${if (scannedMrz.expiryCheckValid) "صحيح ✓" else "-"}",
                         style = MaterialTheme.typography.bodyMedium
                     )
+                    validation.issues.forEach { issue ->
+                        Text("• تنبيه وثيقة: $issue", color = SovereignCrimson, style = MaterialTheme.typography.labelMedium)
+                    }
                 }
             }
         }

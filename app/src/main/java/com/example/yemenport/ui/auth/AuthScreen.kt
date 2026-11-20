@@ -141,15 +141,14 @@ fun AuthScreen() {
         ) {
             Box(
                 modifier = Modifier
-                    .size(104.dp)
-                    .clip(CircleShape)
-                    .background(SovereignNavy),
+                    .size(108.dp)
+                    .clip(CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
                     painter = painterResource(id = R.drawable.ic_launcher_fg_img),
                     contentDescription = stringResource(R.string.app_name),
-                    modifier = Modifier.size(86.dp)
+                    modifier = Modifier.fillMaxSize()
                 )
             }
 

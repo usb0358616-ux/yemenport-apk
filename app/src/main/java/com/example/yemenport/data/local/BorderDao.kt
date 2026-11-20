@@ -44,6 +44,15 @@ interface BorderDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertTravel(item: TravelEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertTravelsBatch(items: List<TravelEntity>)
+
+    @Query("SELECT * FROM travels WHERE synced = 0 LIMIT 200")
+    suspend fun getUnsyncedTravels(): List<TravelEntity>
+
+    @Query("UPDATE travels SET synced = 1 WHERE id IN (:ids)")
+    suspend fun markTravelsSynced(ids: List<String>)
+
     // Security Reports
     @Query("SELECT * FROM security_reports ORDER BY createdAt DESC")
     fun observeReports(): Flow<List<SecurityReportEntity>>

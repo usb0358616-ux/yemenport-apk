@@ -156,6 +156,16 @@ class FirestoreSyncRepository(
             }
             if (syncedTravelers.isNotEmpty()) dao.markTravelersSynced(syncedTravelers)
 
+            val travels = dao.getUnsyncedTravels()
+            val syncedTravels = mutableListOf<String>()
+            for (tr in travels) {
+                if (upsertDoc(userId, "travels", tr.id, tr.toCreateFirestoreMap()).isSuccess) {
+                    syncedTravels.add(tr.id)
+                    pushed++
+                }
+            }
+            if (syncedTravels.isNotEmpty()) dao.markTravelsSynced(syncedTravels)
+
             val reports = dao.getUnsyncedReports()
             val syncedReports = mutableListOf<String>()
             for (r in reports) {
@@ -316,6 +326,13 @@ class FirestoreSyncRepository(
             if (travelers.isNotEmpty()) {
                 dao.upsertTravelersBatch(travelers)
                 pulled += travelers.size
+            }
+
+            val trSnap = root.collection("travels").get().await()
+            val travels = trSnap.toObjects(FsTravel::class.java, ServerTimestampBehavior.ESTIMATE).map { it.toEntity() }
+            if (travels.isNotEmpty()) {
+                dao.upsertTravelsBatch(travels)
+                pulled += travels.size
             }
 
             val repSnap = root.collection("reports").get().await()
