@@ -9,19 +9,28 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.Companion.APPLICATION_KEY
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.yemenport.core.BiometricAuthentication
 import com.example.yemenport.core.configureAppCheck
-import com.example.yemenport.data.local.BorderDatabase
+import com.example.yemenport.data.local.AppDatabase
 import com.example.yemenport.data.remote.FirestoreSyncRepository
 import com.example.yemenport.data.repository.SovereignRepository
 import com.example.yemenport.domain.ai.SovereignAiRepository
@@ -37,8 +46,10 @@ import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -114,7 +125,7 @@ private fun AuthenticatedBorderApp(
                 val app = checkNotNull(this[APPLICATION_KEY])
                 val dbId = app.getString(R.string.firestore_database_id)
                 val fsDb = FirebaseFirestore.getInstance(dbId)
-                val localDb = BorderDatabase.getInstance(app)
+                val localDb = AppDatabase.getInstance(app)
                 val repo = SovereignRepository(
                     dao = localDb.borderDao(),
                     firestoreSync = FirestoreSyncRepository(fsDb)
@@ -156,9 +167,47 @@ private fun AuthenticatedBorderApp(
     val importProgress by viewModel.importProgress.collectAsStateWithLifecycle()
     val stagedBatch by viewModel.stagedBatch.collectAsStateWithLifecycle()
     val lastCommitResult by viewModel.lastCommitResult.collectAsStateWithLifecycle()
+    val isBiometricLocked by viewModel.isBiometricLocked.collectAsStateWithLifecycle()
+
+    val biometricAuth = remember { BiometricAuthentication() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner, session.biometricEnabled) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.checkIdleTimeout()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(session.biometricEnabled, isBiometricLocked) {
+        if (session.biometricEnabled && !isBiometricLocked) {
+            while (isActive) {
+                delay(15_000L)
+                viewModel.checkIdleTimeout()
+            }
+        }
+    }
 
     LaunchedEffect(session.highContrastMode) {
         onDarkModeChanged(session.highContrastMode)
+    }
+
+    if (session.biometricEnabled && isBiometricLocked) {
+        BiometricLockScreen(
+            officerName = session.officerName,
+            portName = session.assignedPort,
+            biometricAuth = biometricAuth,
+            onUnlocked = { viewModel.unlockSession() },
+            onSignOut = {
+                scope.launch {
+                    withContext(NonCancellable) { onSignOut() }
+                }
+            }
+        )
+        return
     }
 
     var currentDest by remember { mutableStateOf(MainDestination.DASHBOARD) }
@@ -176,7 +225,18 @@ private fun AuthenticatedBorderApp(
         }
     }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent(PointerEventPass.Initial)
+                        viewModel.recordUserInteraction()
+                    }
+                }
+            }
+    ) {
         val useRail = maxWidth >= 680.dp
 
         Scaffold(
@@ -333,6 +393,105 @@ private fun AuthenticatedBorderApp(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BiometricLockScreen(
+    officerName: String,
+    portName: String,
+    biometricAuth: BiometricAuthentication,
+    onUnlocked: () -> Unit,
+    onSignOut: () -> Unit
+) {
+    val context = LocalContext.current
+    val activity = context as? FragmentActivity
+    var authError by remember { mutableStateOf<String?>(null) }
+
+    fun triggerUnlockPrompt() {
+        if (activity == null) {
+            authError = "تعذر ربط نافذة التحقق بالبصمة."
+            return
+        }
+        if (!biometricAuth.canAuthenticate(context)) {
+            onUnlocked()
+            return
+        }
+        authError = null
+        biometricAuth.authenticate(
+            activity = activity,
+            title = "تحقق أمني لفتح جلسة الضابط",
+            subtitle = "$officerName • $portName",
+            onSuccess = onUnlocked,
+            onFailed = { authError = "لم تتطابق البصمة — أعد المحاولة" },
+            onError = { err -> authError = err },
+            onCancelled = { authError = "تم إلغاء التحقق؛ اضغط للمتابعة بالبصمة" }
+        )
+    }
+
+    LaunchedEffect(activity) {
+        triggerUnlockPrompt()
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxSize().testTag("biometric_lock_screen"),
+        color = MaterialTheme.colorScheme.background
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Fingerprint,
+                contentDescription = "قفل البصمة الميداني",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(72.dp)
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = "الجلسة محمية بالبصمة الميدانية",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "$officerName — $portName",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            if (authError != null) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = authError!!,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+            Button(
+                onClick = { triggerUnlockPrompt() },
+                modifier = Modifier.fillMaxWidth().widthIn(max = 360.dp).height(52.dp).testTag("biometric_unlock_button")
+            ) {
+                Icon(Icons.Default.LockOpen, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("فتح القفل بالبصمة")
+            }
+            Spacer(Modifier.height(12.dp))
+            TextButton(
+                onClick = onSignOut,
+                modifier = Modifier.heightIn(min = 48.dp).testTag("biometric_lock_sign_out_button")
+            ) {
+                Text("تسجيل الخروج من الحساب")
             }
         }
     }

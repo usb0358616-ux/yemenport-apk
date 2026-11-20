@@ -53,6 +53,9 @@ data class TravelerEntity(
     val investigatingOfficer: String = "",
     val additionalInfo: String = "",
     val mergeHistory: String = "",
+    val securityFlags: List<String> = emptyList(),
+    val mergeRecords: List<MergeHistoryEntry> = emptyList(),
+    val extraAttributes: Map<String, String> = emptyMap(),
     val synced: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
@@ -251,21 +254,6 @@ data class PortOfficerEntity(
     val synced: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
-)
-
-@Entity(tableName = "audit_logs")
-data class AuditLogEntity(
-    @PrimaryKey val id: String,
-    val action: String,
-    val entityType: String,
-    val entityId: String = "",
-    val details: String,
-    val officerName: String,
-    val officerRole: String,
-    val portName: String = "",
-    val timestampIso: String,
-    val synced: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "learned_patterns")

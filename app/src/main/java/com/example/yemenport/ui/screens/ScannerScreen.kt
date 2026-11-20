@@ -33,8 +33,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.yemenport.domain.ai.AiDocumentExtraction
-import com.example.yemenport.domain.mrz.CameraMrzAnalyzer
 import com.example.yemenport.domain.mrz.MrzParseResult
+import com.example.yemenport.domain.mrz.PassportOcrAnalyzer
 import com.example.yemenport.domain.security.WatchlistCheckSummary
 import com.example.yemenport.ui.OfficerSession
 import com.example.yemenport.ui.UiState
@@ -153,7 +153,7 @@ fun ScannerScreen(
     }
 
     val analyzer = remember {
-        CameraMrzAnalyzer(
+        PassportOcrAnalyzer(
             onMrzDetected = { res ->
                 onMrzDetected(res)
                 cameraActive = false
@@ -162,6 +162,10 @@ fun ScannerScreen(
                 liveOcrPreview = txt.take(180)
             }
         )
+    }
+
+    DisposableEffect(analyzer) {
+        onDispose { analyzer.close() }
     }
 
     Column(

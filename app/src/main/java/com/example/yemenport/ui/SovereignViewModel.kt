@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.yemenport.core.BiometricAuthentication
 import com.example.yemenport.core.OfficerRole
 import com.example.yemenport.data.local.*
 import com.example.yemenport.data.repository.SovereignRepository
@@ -65,6 +66,9 @@ class SovereignViewModel(
     val travelers: StateFlow<List<TravelerEntity>> = repository.travelers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
+    val travels: StateFlow<List<TravelEntity>> = repository.travels
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
     val reports: StateFlow<List<SecurityReportEntity>> = repository.reports
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
@@ -120,8 +124,13 @@ class SovereignViewModel(
                     hqCenterName = fs.hqCenterName.ifBlank { _session.value.hqCenterName }
                 )
                 _session.value = updated
+                if (!hasCheckedStartupLock && updated.biometricEnabled) {
+                    _isBiometricLocked.value = true
+                }
+                hasCheckedStartupLock = true
                 UiState.Success(updated)
             } else {
+                hasCheckedStartupLock = true
                 UiState.Success(_session.value)
             }
         }
@@ -185,9 +194,42 @@ class SovereignViewModel(
     private val _lastCommitResult = MutableStateFlow<CommitImportResult?>(null)
     val lastCommitResult: StateFlow<CommitImportResult?> = _lastCommitResult.asStateFlow()
 
+    private val _isBiometricLocked = MutableStateFlow(false)
+    val isBiometricLocked: StateFlow<Boolean> = _isBiometricLocked.asStateFlow()
+    private var lastActivityMs: Long = System.currentTimeMillis()
+    private var hasCheckedStartupLock: Boolean = false
+
     fun clearStatusBanner() { _statusBanner.value = null }
     fun clearCriticalAlert() { _criticalAlert.value = null }
     fun clearAiState() { _aiState.value = null }
+
+    fun recordUserInteraction(nowMs: Long = System.currentTimeMillis()) {
+        if (!_isBiometricLocked.value) {
+            lastActivityMs = nowMs
+        }
+    }
+
+    fun checkIdleTimeout(
+        nowMs: Long = System.currentTimeMillis(),
+        timeoutMs: Long = BiometricAuthentication.DEFAULT_IDLE_TIMEOUT_MS
+    ) {
+        if (_session.value.biometricEnabled && !_isBiometricLocked.value) {
+            if (nowMs - lastActivityMs >= timeoutMs) {
+                _isBiometricLocked.value = true
+            }
+        }
+    }
+
+    fun lockSession() {
+        if (_session.value.biometricEnabled) {
+            _isBiometricLocked.value = true
+        }
+    }
+
+    fun unlockSession(nowMs: Long = System.currentTimeMillis()) {
+        _isBiometricLocked.value = false
+        lastActivityMs = nowMs
+    }
 
     fun updateSession(
         officerName: String = _session.value.officerName,
@@ -199,6 +241,11 @@ class SovereignViewModel(
     ) {
         val next = OfficerSession(officerName, role, assignedPort, biometricEnabled, highContrastMode, hqCenterName)
         _session.value = next
+        if (!biometricEnabled) {
+            _isBiometricLocked.value = false
+        } else {
+            lastActivityMs = System.currentTimeMillis()
+        }
         viewModelScope.launch {
             repository.saveProfileSettings(
                 userId = currentUserId,
@@ -232,8 +279,20 @@ class SovereignViewModel(
             queryLatinName = latinName,
             travelers = travelers.value,
             reports = reports.value,
-            seizures = seizures.value
+            seizures = seizures.value,
+            travels = travels.value
         )
+        emitWatchlistAlertIfCritical(context, summary, name, passport, latinName)
+        return summary
+    }
+
+    private fun emitWatchlistAlertIfCritical(
+        context: Context,
+        summary: WatchlistCheckSummary,
+        name: String,
+        passport: String,
+        latinName: String
+    ) {
         if (summary.isCritical) {
             _criticalAlert.value = summary
             WatchlistGuardEngine.triggerCriticalFeedback(context)
@@ -246,17 +305,26 @@ class SovereignViewModel(
                     details = "تطابق حرج للاسم ($name / $latinName) جواز ($passport): ${summary.hits.firstOrNull()?.reason}",
                     officerName = s.officerName,
                     officerRole = s.role.arabicTitle,
-                    portName = s.assignedPort
+                    portName = s.assignedPort,
+                    severityLevel = AuditSeverity.CRITICAL,
+                    metadata = mapOf("passport" to passport, "hits" to summary.hits.size.toString())
                 )
             }
         }
-        return summary
     }
 
     fun onMrzDetected(context: Context, result: MrzParseResult) {
         _scannedMrz.value = result
-        checkWatchlistAndAlert(
+        val summary = WatchlistGuardEngine.checkExtractedMrz(
+            mrz = result,
+            travelers = travelers.value,
+            reports = reports.value,
+            seizures = seizures.value,
+            travels = travels.value
+        )
+        emitWatchlistAlertIfCritical(
             context = context,
+            summary = summary,
             name = result.fullLatinName,
             passport = result.passportNumber,
             latinName = result.fullLatinName

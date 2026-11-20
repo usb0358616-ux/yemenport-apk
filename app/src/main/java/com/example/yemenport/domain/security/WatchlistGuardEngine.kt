@@ -7,17 +7,25 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import com.example.yemenport.data.local.BorderDao
 import com.example.yemenport.data.local.PassportSeizureEntity
 import com.example.yemenport.data.local.SecurityReportEntity
+import com.example.yemenport.data.local.TravelClearanceStatus
+import com.example.yemenport.data.local.TravelEntity
 import com.example.yemenport.data.local.TravelerEntity
+import com.example.yemenport.domain.mrz.MrzParseResult
+import com.example.yemenport.domain.mrz.PassportOcrAnalyzer
+import kotlinx.coroutines.flow.first
 import kotlin.math.max
 import kotlin.math.min
 
 enum class WatchlistMatchSource(val arabicLabel: String) {
     TRAVEL_BAN("منع سفر مسجل"),
+    ACTIVE_WARRANT("أمر قبض / تعميم نشط"),
     SECURITY_REPORT("بلاغ وتعميم أمني"),
     PASSPORT_SEIZURE("محضر جواز مضبوط / مزور"),
-    PREVIOUS_RETURN("حالة إرتجاع سابقة")
+    PREVIOUS_RETURN("حالة إرتجاع سابقة"),
+    DOCUMENT_ANOMALY("خلل / انتهاء صلاحية الوثيقة")
 }
 
 data class WatchlistMatch(
@@ -36,8 +44,18 @@ data class WatchlistCheckSummary(
     val hits: List<WatchlistMatch>
 ) {
     val isCritical: Boolean get() = hits.isNotEmpty()
+    val hasActiveWarrantOrBan: Boolean
+        get() = hits.any {
+            it.source == WatchlistMatchSource.TRAVEL_BAN ||
+                it.source == WatchlistMatchSource.ACTIVE_WARRANT ||
+                it.source == WatchlistMatchSource.PASSPORT_SEIZURE
+        }
 }
 
+/**
+ * Security screening service comparing extracted OCR/MRZ traveler data against local Room records
+ * for prohibited travel statuses, active warrants, security circulars, and seized/expired passports.
+ */
 object WatchlistGuardEngine {
 
     fun normalizeArabic(text: String): String {
@@ -99,20 +117,124 @@ object WatchlistGuardEngine {
         return if (sim >= 82) sim else 0
     }
 
+    private fun isActiveWarrantReport(report: SecurityReportEntity): Boolean {
+        val marker = "${report.reportType} ${report.severity} ${report.title}"
+        return marker.contains("قبض") ||
+            marker.contains("توقيف") ||
+            marker.contains("مذكرة") ||
+            marker.contains("مطلوب") ||
+            report.severity == "حرج" ||
+            report.severity == "عالي"
+    }
+
+    suspend fun verifyExtractedMrz(
+        mrz: MrzParseResult,
+        dao: BorderDao
+    ): WatchlistCheckSummary {
+        val travelers = dao.getAllTravelers()
+        val reports = dao.getAllReports()
+        val seizures = dao.getAllSeizures()
+        val passportCrossings = if (mrz.passportNumber.isNotBlank()) {
+            dao.observeTravelsForPassport(mrz.passportNumber).first()
+        } else {
+            emptyList()
+        }
+        return checkExtractedMrz(
+            mrz = mrz,
+            travelers = travelers,
+            reports = reports,
+            seizures = seizures,
+            travels = passportCrossings
+        )
+    }
+
+    suspend fun verifyAgainstDatabase(
+        queryName: String,
+        queryPassport: String,
+        queryLatinName: String = "",
+        dao: BorderDao
+    ): WatchlistCheckSummary {
+        val travelers = dao.getAllTravelers()
+        val reports = dao.getAllReports()
+        val seizures = dao.getAllSeizures()
+        val travels = if (queryPassport.isNotBlank()) {
+            dao.observeTravelsForPassport(queryPassport).first()
+        } else {
+            emptyList()
+        }
+        return checkWatchlist(
+            queryName = queryName,
+            queryPassport = queryPassport,
+            queryLatinName = queryLatinName,
+            travelers = travelers,
+            reports = reports,
+            seizures = seizures,
+            travels = travels
+        )
+    }
+
+    fun checkExtractedMrz(
+        mrz: MrzParseResult,
+        travelers: List<TravelerEntity>,
+        reports: List<SecurityReportEntity>,
+        seizures: List<PassportSeizureEntity>,
+        travels: List<TravelEntity> = emptyList()
+    ): WatchlistCheckSummary {
+        val base = checkWatchlist(
+            queryName = mrz.fullLatinName,
+            queryPassport = mrz.passportNumber,
+            queryLatinName = mrz.fullLatinName,
+            travelers = travelers,
+            reports = reports,
+            seizures = seizures,
+            travels = travels
+        )
+        val validation = PassportOcrAnalyzer.validateTravelerDocument(mrz)
+        val docHits = mutableListOf<WatchlistMatch>()
+        if (mrz.passportStatus == "منتهي") {
+            docHits.add(
+                WatchlistMatch(
+                    source = WatchlistMatchSource.DOCUMENT_ANOMALY,
+                    recordId = "doc_exp_${mrz.passportNumber}",
+                    matchedName = mrz.fullLatinName,
+                    matchedPassport = mrz.passportNumber,
+                    reason = "الجواز منتهي الصلاحية (${mrz.expiryDate})",
+                    confidencePercent = 100,
+                    matchType = "فحص صلاحية الوثيقة"
+                )
+            )
+        } else if (!validation.isCheckDigitValid && mrz.format.startsWith("MRZ")) {
+            docHits.add(
+                WatchlistMatch(
+                    source = WatchlistMatchSource.DOCUMENT_ANOMALY,
+                    recordId = "doc_chk_${mrz.passportNumber}",
+                    matchedName = mrz.fullLatinName,
+                    matchedPassport = mrz.passportNumber,
+                    reason = "عدم تطابق خانات التحقق الرقمية في سطر MRZ — يلزم فحص التزوير",
+                    confidencePercent = 95,
+                    matchType = "فحص Check Digit"
+                )
+            )
+        }
+        if (docHits.isEmpty()) return base
+        return base.copy(hits = (base.hits + docHits).sortedByDescending { it.confidencePercent })
+    }
+
     fun checkWatchlist(
         queryName: String,
         queryPassport: String,
         queryLatinName: String = "",
         travelers: List<TravelerEntity>,
         reports: List<SecurityReportEntity>,
-        seizures: List<PassportSeizureEntity>
+        seizures: List<PassportSeizureEntity>,
+        travels: List<TravelEntity> = emptyList()
     ): WatchlistCheckSummary {
         val hits = mutableListOf<WatchlistMatch>()
         val normPass = normalizePassport(queryPassport)
 
-        // 1. Travel Bans & Previous Returns
+        // 1. Prohibited Travel Status & Previous Returns in TravelerEntity
         for (t in travelers) {
-            val isBanned = t.travelAllowed == "لا"
+            val isBanned = t.travelAllowed == "لا" || t.securityFlags.contains("ممنوع_من_السفر")
             val hasReturn = t.returnReason.isNotBlank() || t.status.contains("مرتجع")
             if (!isBanned && !hasReturn) continue
 
@@ -139,7 +261,38 @@ object WatchlistGuardEngine {
             }
         }
 
-        // 2. Security Reports & Circulars
+        // 2. Prior Prohibited / Returned Crossings in TravelEntity
+        for (tr in travels) {
+            val blocked = tr.clearanceStatus == TravelClearanceStatus.BLOCKED ||
+                tr.clearanceStatus == TravelClearanceStatus.RETURNED ||
+                tr.travelAllowed == "لا"
+            if (!blocked) continue
+            val trPass = normalizePassport(tr.passportNumber)
+            val passMatch = normPass.isNotEmpty() && trPass == normPass
+            val nameScore = max(
+                nameMatchScore(queryName, tr.travelerName),
+                nameMatchScore(queryLatinName, tr.travelerName)
+            )
+            if (passMatch || nameScore >= 85) {
+                hits.add(
+                    WatchlistMatch(
+                        source = if (tr.clearanceStatus == TravelClearanceStatus.RETURNED) {
+                            WatchlistMatchSource.PREVIOUS_RETURN
+                        } else {
+                            WatchlistMatchSource.TRAVEL_BAN
+                        },
+                        recordId = tr.id,
+                        matchedName = tr.travelerName,
+                        matchedPassport = tr.passportNumber,
+                        reason = "سجل عبور مقيد (${tr.clearanceStatus.arabicLabel}) في ${tr.portName}: ${tr.vettingStatus}",
+                        confidencePercent = if (passMatch) 100 else nameScore,
+                        matchType = if (passMatch) "تطابق سجل العبور بالجواز" else "تشابه سجل العبور ($nameScore%)"
+                    )
+                )
+            }
+        }
+
+        // 3. Active Warrants & Security Reports / Circulars
         for (r in reports) {
             if (r.status == "مرفوض") continue
             val rPass = normalizePassport(r.targetPassportNumber)
@@ -149,21 +302,26 @@ object WatchlistGuardEngine {
                 nameMatchScore(queryLatinName, r.targetName)
             )
             if (passMatch || nameScore >= 80) {
+                val source = if (isActiveWarrantReport(r)) {
+                    WatchlistMatchSource.ACTIVE_WARRANT
+                } else {
+                    WatchlistMatchSource.SECURITY_REPORT
+                }
                 hits.add(
                     WatchlistMatch(
-                        source = WatchlistMatchSource.SECURITY_REPORT,
+                        source = source,
                         recordId = r.id,
                         matchedName = r.targetName.ifBlank { r.title },
                         matchedPassport = r.targetPassportNumber,
-                        reason = "${r.title}: ${r.description}".take(140),
+                        reason = "${r.title} (${r.status}): ${r.description}".take(160),
                         confidencePercent = if (passMatch) 100 else nameScore,
-                        matchType = if (passMatch) "تطابق تعميم بالجواز" else "تطابق اسم مع بلاغ ($nameScore%)"
+                        matchType = if (passMatch) "تطابق تعميم/مذكرة بالجواز" else "تطابق اسم مع بلاغ ($nameScore%)"
                     )
                 )
             }
         }
 
-        // 3. Passport Seizures / Forged Passports
+        // 4. Passport Seizures / Forged Passports
         for (s in seizures) {
             val sPass = normalizePassport(s.passportNumber)
             val passMatch = normPass.isNotEmpty() && sPass == normPass
@@ -189,7 +347,7 @@ object WatchlistGuardEngine {
         return WatchlistCheckSummary(
             queryName = queryName.ifBlank { queryLatinName },
             queryPassport = queryPassport,
-            hits = hits.sortedByDescending { it.confidencePercent }
+            hits = hits.distinctBy { "${it.source}:${it.recordId}" }.sortedByDescending { it.confidencePercent }
         )
     }
 

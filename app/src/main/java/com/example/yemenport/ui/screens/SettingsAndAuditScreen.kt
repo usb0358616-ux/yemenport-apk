@@ -1,8 +1,6 @@
 package com.example.yemenport.ui.screens
 
 import android.widget.Toast
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -17,11 +15,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import com.example.yemenport.core.BiometricAuthentication
 import com.example.yemenport.core.OfficerRole
 import com.example.yemenport.core.SovereignConstants
 import com.example.yemenport.data.local.AuditLogEntity
+import com.example.yemenport.data.local.AuditSeverity
 import com.example.yemenport.data.local.PortOfficerEntity
 import com.example.yemenport.ui.OfficerSession
 import com.example.yemenport.ui.theme.SovereignCrimson
@@ -52,40 +51,30 @@ fun SettingsAndAuditScreen(
     var newOffName by remember { mutableStateOf("") }
     var newOffDuty by remember { mutableStateOf(true) }
 
+    val biometricAuth = remember { BiometricAuthentication() }
+
     fun verifyBiometricAndToggle(enable: Boolean) {
         val activity = context as? FragmentActivity
-        val bm = BiometricManager.from(context)
-        val canAuth = bm.canAuthenticate(
-            BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        ) == BiometricManager.BIOMETRIC_SUCCESS
-
-        if (!enable || activity == null || !canAuth) {
+        if (!enable || activity == null || !biometricAuth.canAuthenticate(context)) {
             onUpdateSession(officerName, selectedRole, selectedPort, enable, session.highContrastMode)
             return
         }
 
-        val executor = ContextCompat.getMainExecutor(context)
-        val prompt = BiometricPrompt(
-            activity,
-            executor,
-            object : BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    onUpdateSession(officerName, selectedRole, selectedPort, true, session.highContrastMode)
-                    Toast.makeText(context, "تم تفعيل قفل البصمة الميداني", Toast.LENGTH_SHORT).show()
-                }
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    Toast.makeText(context, errString, Toast.LENGTH_SHORT).show()
-                }
+        biometricAuth.authenticate(
+            activity = activity,
+            title = "تأكيد الهوية بالبصمة",
+            subtitle = "تفعيل القفل التلقائي عند الفتح وبعد الخمول",
+            onSuccess = {
+                onUpdateSession(officerName, selectedRole, selectedPort, true, session.highContrastMode)
+                Toast.makeText(context, "تم تفعيل قفل البصمة الميداني (عند الفتح وبعد الخمول)", Toast.LENGTH_SHORT).show()
+            },
+            onFailed = {
+                Toast.makeText(context, "لم تتطابق البصمة — حاول مجدداً", Toast.LENGTH_SHORT).show()
+            },
+            onError = { msg ->
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
             }
         )
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("تأكيد الهوية بالبصمة")
-            .setSubtitle("نظام المنافذ والجوازات الذكي")
-            .setAllowedAuthenticators(
-                BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
-            )
-            .build()
-        prompt.authenticate(promptInfo)
     }
 
     LazyColumn(
@@ -225,7 +214,11 @@ fun SettingsAndAuditScreen(
                 ElevatedCard(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(log.action, fontWeight = FontWeight.Bold, color = SovereignEmerald)
+                            Text(
+                                "${log.action} [${log.severityLevel.arabicLabel}]",
+                                fontWeight = FontWeight.Bold,
+                                color = if (log.severityLevel == AuditSeverity.CRITICAL) SovereignCrimson else SovereignEmerald
+                            )
                             Text(log.timestampIso.take(16), style = MaterialTheme.typography.labelSmall)
                         }
                         Text(log.details, style = MaterialTheme.typography.bodyMedium)

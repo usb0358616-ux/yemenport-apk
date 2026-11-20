@@ -12,6 +12,7 @@ class SovereignRepository(
 ) {
     // Reactive Local Streams (Offline-First Source of Truth)
     val travelers: Flow<List<TravelerEntity>> = dao.observeTravelers()
+    val travels: Flow<List<TravelEntity>> = dao.observeTravels()
     val reports: Flow<List<SecurityReportEntity>> = dao.observeReports()
     val movements: Flow<List<PatrolMovementEntity>> = dao.observeMovements()
     val seizures: Flow<List<PassportSeizureEntity>> = dao.observeSeizures()
@@ -54,8 +55,11 @@ class SovereignRepository(
         details: String,
         officerName: String,
         officerRole: String,
-        portName: String
+        portName: String,
+        severityLevel: AuditSeverity = AuditSeverity.INFO,
+        metadata: Map<String, String> = emptyMap()
     ) {
+        val now = Instant.now()
         dao.insertAuditLog(
             AuditLogEntity(
                 id = "log_${UUID.randomUUID().toString().replace("-", "").take(16)}",
@@ -66,7 +70,10 @@ class SovereignRepository(
                 officerName = officerName,
                 officerRole = officerRole,
                 portName = portName,
-                timestampIso = Instant.now().toString(),
+                timestampIso = now.toString(),
+                severityLevel = severityLevel,
+                metadata = metadata,
+                recordedAt = now,
                 synced = false
             )
         )
@@ -84,12 +91,35 @@ class SovereignRepository(
         val passport = incoming.idNumber.trim()
         val existing = if (passport.isNotBlank()) dao.findTravelerByPassport(passport) else null
         if (existing == null) {
+            val flags = buildList {
+                if (incoming.travelAllowed == "لا") add("ممنوع_من_السفر")
+                if (incoming.passportStatus != "صالح") add("جواز_${incoming.passportStatus}")
+                addAll(incoming.securityFlags)
+            }.distinct()
             val saved = incoming.copy(
                 id = incoming.id.ifBlank { "trv_${UUID.randomUUID().toString().replace("-", "").take(16)}" },
+                securityFlags = flags,
                 synced = false,
                 updatedAt = System.currentTimeMillis()
             )
             dao.upsertTraveler(saved)
+            dao.upsertTravel(
+                TravelEntity(
+                    id = "tr_${UUID.randomUUID().toString().replace("-", "").take(16)}",
+                    travelerId = saved.id,
+                    travelerName = saved.fullName,
+                    passportNumber = saved.idNumber,
+                    portName = saved.portName.ifBlank { portName },
+                    direction = if (saved.exitDate.isNotBlank()) "مغادرة" else "عبور",
+                    destination = saved.destination,
+                    travelAllowed = saved.travelAllowed,
+                    clearanceStatus = TravelClearanceStatus.fromTravelAllowedFlag(saved.travelAllowed),
+                    vettingStatus = saved.vettingResult,
+                    officerName = officerName,
+                    flags = flags,
+                    metadata = mapOf("agency" to saved.agency, "visaType" to saved.visaType).filterValues { it.isNotBlank() }
+                )
+            )
             logAudit(
                 action = "إضافة مسافر",
                 entityType = "Traveler",
@@ -97,7 +127,9 @@ class SovereignRepository(
                 details = "تسجيل ${saved.fullName} (جواز: ${saved.idNumber}) — سماح العبور: ${saved.travelAllowed}",
                 officerName = officerName,
                 officerRole = officerRole,
-                portName = portName
+                portName = portName,
+                severityLevel = if (saved.travelAllowed == "لا") AuditSeverity.CRITICAL else AuditSeverity.INFO,
+                metadata = mapOf("passport" to saved.idNumber, "travelAllowed" to saved.travelAllowed)
             )
             return saved to false
         }
@@ -110,6 +142,21 @@ class SovereignRepository(
             } else oldVal
         }
 
+        val effectiveAllowed = if (existing.travelAllowed == "لا" || incoming.travelAllowed == "لا") "لا" else "نعم"
+        val updatedFlags = buildList {
+            addAll(existing.securityFlags)
+            addAll(incoming.securityFlags)
+            if (effectiveAllowed == "لا") add("ممنوع_من_السفر")
+        }.distinct()
+        val nowIso = Instant.now().toString()
+        val mergeEntry = MergeHistoryEntry(
+            timestampIso = nowIso.take(16),
+            officerName = officerName,
+            portName = portName,
+            changedFields = diffs.toList(),
+            note = if (diffs.isEmpty()) "تأكيد بيانات مطابقة" else "تحديث ذكي عبر المنفذ"
+        )
+
         val merged = existing.copy(
             fullName = pick(existing.fullName, incoming.fullName, "الاسم"),
             passportName = pick(existing.passportName, incoming.passportName, "الاسم اللاتيني"),
@@ -121,22 +168,41 @@ class SovereignRepository(
             agency = pick(existing.agency, incoming.agency, "الوكالة"),
             visaType = pick(existing.visaType, incoming.visaType, "التأشيرة"),
             destination = pick(existing.destination, incoming.destination, "الوجهة"),
-            travelAllowed = if (existing.travelAllowed == "لا" || incoming.travelAllowed == "لا") "لا" else "نعم",
+            travelAllowed = effectiveAllowed,
             vettingResult = if (existing.travelAllowed == "لا") existing.vettingResult else incoming.vettingResult,
             returnReason = pick(existing.returnReason, incoming.returnReason, "سبب الإرتجاع"),
             additionalInfo = pick(existing.additionalInfo, incoming.additionalInfo, "ملاحظات"),
+            securityFlags = updatedFlags,
+            mergeRecords = (existing.mergeRecords + mergeEntry).takeLast(30),
             mergeHistory = buildString {
                 if (existing.mergeHistory.isNotBlank()) {
                     append(existing.mergeHistory)
                     append("\n")
                 }
-                append("[${Instant.now().toString().take(16)}] دمج بواسطة $officerName: ")
+                append("[${nowIso.take(16)}] دمج بواسطة $officerName: ")
                 append(if (diffs.isEmpty()) "تأكيد بيانات مطابقة" else diffs.joinToString(" | "))
             }.take(1950),
             synced = false,
             updatedAt = System.currentTimeMillis()
         )
         dao.upsertTraveler(merged)
+        dao.upsertTravel(
+            TravelEntity(
+                id = "tr_${UUID.randomUUID().toString().replace("-", "").take(16)}",
+                travelerId = merged.id,
+                travelerName = merged.fullName,
+                passportNumber = merged.idNumber,
+                portName = merged.portName.ifBlank { portName },
+                direction = if (incoming.exitDate.isNotBlank()) "مغادرة" else "تحديث_عبور",
+                destination = merged.destination,
+                travelAllowed = merged.travelAllowed,
+                clearanceStatus = TravelClearanceStatus.fromTravelAllowedFlag(merged.travelAllowed),
+                vettingStatus = merged.vettingResult,
+                officerName = officerName,
+                flags = updatedFlags,
+                metadata = mapOf("mergedDiffs" to diffs.size.toString())
+            )
+        )
         logAudit(
             action = "دمج ذكي لمسافر",
             entityType = "Traveler",
@@ -144,7 +210,9 @@ class SovereignRepository(
             details = "دمج تحديثات الجواز $passport (${diffs.size} تغييرات)",
             officerName = officerName,
             officerRole = officerRole,
-            portName = portName
+            portName = portName,
+            severityLevel = if (merged.travelAllowed == "لا") AuditSeverity.WARN else AuditSeverity.INFO,
+            metadata = mapOf("passport" to passport, "changesCount" to diffs.size.toString())
         )
         return merged to true
     }

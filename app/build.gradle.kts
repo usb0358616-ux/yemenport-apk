@@ -124,4 +124,9 @@ dependencies {
     // QR Code Generation & PDF Reading
     implementation(libs.zxing.core)
     implementation(libs.pdfbox.android)
+
+    // Local JVM & Robolectric Testing
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }

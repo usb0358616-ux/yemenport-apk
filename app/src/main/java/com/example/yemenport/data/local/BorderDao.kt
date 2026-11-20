@@ -34,6 +34,16 @@ interface BorderDao {
     @Query("UPDATE travelers SET synced = 1 WHERE id IN (:ids)")
     suspend fun markTravelersSynced(ids: List<String>)
 
+    // Travel Crossings (TravelEntity)
+    @Query("SELECT * FROM travels ORDER BY createdAt DESC LIMIT 1000")
+    fun observeTravels(): Flow<List<TravelEntity>>
+
+    @Query("SELECT * FROM travels WHERE passportNumber = :passportNo ORDER BY createdAt DESC")
+    fun observeTravelsForPassport(passportNo: String): Flow<List<TravelEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertTravel(item: TravelEntity)
+
     // Security Reports
     @Query("SELECT * FROM security_reports ORDER BY createdAt DESC")
     fun observeReports(): Flow<List<SecurityReportEntity>>
