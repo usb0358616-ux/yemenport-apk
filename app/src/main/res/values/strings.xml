@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">نظام المنافذ والجوازات</string>
+    <string name="app_subtitle">النظام الميداني السيادي للمعاينة والضبط الحدودي</string>
+    <string name="republic_header">الجمهورية اليمنية — وزارة الداخلية • مصلحة الهجرة والجوازات والجنسية</string>
+
+    <!-- Auth & Security -->
+    <string name="auth_title">بوابة الضباط السيادية</string>
+    <string name="auth_subtitle">تسجيل الدخول الموحد بحساب Google للمزامنة السحابية وخدمات الذكاء الاصطناعي، مع عمل قاعدة البيانات المحلية أوفلاين بالكامل.</string>
+    <string name="sign_in_with_google">تسجيل الدخول بحساب Google</string>
+    <string name="sign_in_cancelled">تم إلغاء تسجيل الدخول. يرجى اختيار الحساب للمتابعة.</string>
+    <string name="sign_in_failed">تعذر إتمام تسجيل الدخول بحساب Google.</string>
+    <string name="biometric_unlock_title">تأكيد الهوية بالبصمة</string>
+    <string name="biometric_unlock_subtitle">نظام المنافذ والجوازات الذكي — تحقق ميداني</string>
+    <string name="biometric_unlock_cancel">إلغاء</string>
+    <string name="sign_out">تسجيل الخروج</string>
+
+    <!-- Navigation -->
+    <string name="nav_dashboard">لوحة التحكم</string>
+    <string name="nav_scanner">الماسح الذكي</string>
+    <string name="nav_travelers">المسافرون</string>
+    <string name="nav_import">الاستيراد الموحد</string>
+    <string name="nav_modules">الوحدات</string>
+    <string name="nav_reports">البلاغات</string>
+    <string name="nav_movements">الدوريات</string>
+    <string name="nav_statistics">الإحصاءات</string>
+    <string name="nav_settings">الإعدادات</string>
+
+    <!-- Actions & Common -->
+    <string name="action_add">إضافة جديد</string>
+    <string name="action_save">حفظ السجل</string>
+    <string name="action_cancel">إلغاء</string>
+    <string name="action_search">بحث شامل بالاسم أو الجواز أو المنفذ...</string>
+    <string name="action_sync_now">مزامنة سحابية</string>
+    <string name="action_export_csv">تصدير CSV</string>
+    <string name="action_export_xlsx">تصدير Excel</string>
+    <string name="action_export_pdf">تصدير PDF</string>
+    <string name="action_pick_files">اختيار ملفات (Excel / CSV / PDF / صور)</string>
+    <string name="action_scan_camera">مسح مباشر بالكاميرا</string>
+    <string name="action_scan_gallery">اختيار صورة من المعرض</string>
+    <string name="action_ai_analyze">تحليل ذكي عبر Gemini</string>
+
+    <!-- Watchlist Alert -->
+    <string name="watchlist_critical_alert">تنبيه أمني حرج: تطابق مع قائمة المطلوبين أو المضبوطات</string>
+    <string name="offline_ready_badge">وضع ميداني أوفلاين جاهز 100%</string>
+    <string name="cloud_synced_badge">متصل بالمزامنة السحابية</string>
+</resources>

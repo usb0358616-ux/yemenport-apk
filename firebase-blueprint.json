@@ -1,0 +1,386 @@
+{
+  "entities": {
+    "Traveler": {
+      "title": "Traveler",
+      "description": "Traveler and visa border crossing record with security vetting and merge history.",
+      "type": "object",
+      "properties": {
+        "serialNumber": { "type": "string" },
+        "firstName": { "type": "string" },
+        "secondName": { "type": "string" },
+        "thirdName": { "type": "string" },
+        "fourthName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "fullName": { "type": "string" },
+        "passportName": { "type": "string" },
+        "idNumber": { "type": "string" },
+        "idType": { "type": "string" },
+        "passportStatus": { "type": "string" },
+        "nationalId": { "type": "string" },
+        "gender": { "type": "string" },
+        "birthDate": { "type": "string" },
+        "age": { "type": "integer" },
+        "country": { "type": "string" },
+        "governorate": { "type": "string" },
+        "profession": { "type": "string" },
+        "phone": { "type": "string" },
+        "center": { "type": "string" },
+        "portName": { "type": "string" },
+        "agency": { "type": "string" },
+        "agencyId": { "type": "string" },
+        "visaType": { "type": "string" },
+        "destination": { "type": "string" },
+        "visitReason": { "type": "string" },
+        "receiveDate": { "type": "string" },
+        "exitDate": { "type": "string" },
+        "issueDate": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "placeOfIssue": { "type": "string" },
+        "requestNumber": { "type": "string" },
+        "returnReason": { "type": "string" },
+        "vettingResult": { "type": "string" },
+        "travelAllowed": { "type": "string", "enum": ["نعم", "لا"] },
+        "status": { "type": "string" },
+        "investigatingOfficer": { "type": "string" },
+        "additionalInfo": { "type": "string" },
+        "mergeHistory": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "idNumber", "travelAllowed", "status", "createdAt", "updatedAt"]
+    },
+    "SecurityReport": {
+      "title": "SecurityReport",
+      "description": "Security alert, watchlist report, or wanted directive.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "targetName": { "type": "string" },
+        "targetPassportNumber": { "type": "string" },
+        "reportType": { "type": "string" },
+        "severity": { "type": "string" },
+        "description": { "type": "string" },
+        "assignedPort": { "type": "string" },
+        "officerName": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "targetName", "status", "createdAt", "updatedAt"]
+    },
+    "PatrolMovement": {
+      "title": "PatrolMovement",
+      "description": "Field patrol vehicle or officer movement dispatch record.",
+      "type": "object",
+      "properties": {
+        "vehicleType": { "type": "string" },
+        "plateNumber": { "type": "string" },
+        "driverName": { "type": "string" },
+        "portName": { "type": "string" },
+        "mission": { "type": "string" },
+        "departureTime": { "type": "string" },
+        "expectedReturnTime": { "type": "string" },
+        "actualReturnTime": { "type": "string" },
+        "outcomeNotes": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["vehicleType", "plateNumber", "driverName", "status", "createdAt", "updatedAt"]
+    },
+    "PassportSeizure": {
+      "title": "PassportSeizure",
+      "description": "Seized or suspected forged passport chain-of-custody record.",
+      "type": "object",
+      "properties": {
+        "recordNumber": { "type": "string" },
+        "travelerName": { "type": "string" },
+        "passportNumber": { "type": "string" },
+        "nationality": { "type": "string" },
+        "seizurePort": { "type": "string" },
+        "seizureDate": { "type": "string" },
+        "reason": { "type": "string" },
+        "status": { "type": "string" },
+        "recipientName": { "type": "string" },
+        "deliveredAt": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["recordNumber", "travelerName", "passportNumber", "status", "createdAt", "updatedAt"]
+    },
+    "UndocumentedMigrant": {
+      "title": "UndocumentedMigrant",
+      "description": "Apprehended undocumented migrant record.",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string" },
+        "nationality": { "type": "string" },
+        "apprehensionPort": { "type": "string" },
+        "apprehensionDate": { "type": "string" },
+        "medicalStatus": { "type": "string" },
+        "shelterLocation": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "nationality", "status", "createdAt", "updatedAt"]
+    },
+    "RefugeeRecord": {
+      "title": "RefugeeRecord",
+      "description": "UNHCR refugee registration and vetting record.",
+      "type": "object",
+      "properties": {
+        "unhcrNumber": { "type": "string" },
+        "fullName": { "type": "string" },
+        "nationality": { "type": "string" },
+        "campOrCity": { "type": "string" },
+        "vettingStatus": { "type": "string" },
+        "permitExpiryDate": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["unhcrNumber", "fullName", "vettingStatus", "createdAt", "updatedAt"]
+    },
+    "ForeignerResident": {
+      "title": "ForeignerResident",
+      "description": "Foreigner resident permit and sponsor record.",
+      "type": "object",
+      "properties": {
+        "residenceNumber": { "type": "string" },
+        "fullName": { "type": "string" },
+        "passportNumber": { "type": "string" },
+        "nationality": { "type": "string" },
+        "employer": { "type": "string" },
+        "profession": { "type": "string" },
+        "entryDate": { "type": "string" },
+        "residenceExpiryDate": { "type": "string" },
+        "medicalClearance": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["residenceNumber", "fullName", "passportNumber", "createdAt", "updatedAt"]
+    },
+    "MovementPermit": {
+      "title": "MovementPermit",
+      "description": "Internal movement permit with QR verification payload.",
+      "type": "object",
+      "properties": {
+        "permitCode": { "type": "string" },
+        "delegationName": { "type": "string" },
+        "authorizedRoute": { "type": "string" },
+        "accommodationPlace": { "type": "string" },
+        "vehicleDetails": { "type": "string" },
+        "passengersList": { "type": "string" },
+        "passengersCount": { "type": "integer" },
+        "validFrom": { "type": "string" },
+        "validTo": { "type": "string" },
+        "approvalStatus": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["permitCode", "delegationName", "approvalStatus", "createdAt", "updatedAt"]
+    },
+    "CitizenshipCase": {
+      "title": "CitizenshipCase",
+      "description": "Citizenship and marriage legal case with SLA tracking.",
+      "type": "object",
+      "properties": {
+        "caseNumber": { "type": "string" },
+        "serviceType": { "type": "string" },
+        "applicantName": { "type": "string" },
+        "spouseOrBeneficiaryName": { "type": "string" },
+        "spouseNationality": { "type": "string" },
+        "submissionDate": { "type": "string" },
+        "slaDaysTarget": { "type": "integer" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["caseNumber", "serviceType", "applicantName", "status", "createdAt", "updatedAt"]
+    },
+    "TravelAgency": {
+      "title": "TravelAgency",
+      "description": "Monitored travel agency or service company.",
+      "type": "object",
+      "properties": {
+        "agencyName": { "type": "string" },
+        "companyType": { "type": "string" },
+        "governorate": { "type": "string" },
+        "center": { "type": "string" },
+        "clearanceStatus": { "type": "string" },
+        "linkedVisasCount": { "type": "integer" },
+        "issuedCount": { "type": "integer" },
+        "returnedCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["agencyName", "clearanceStatus", "createdAt", "updatedAt"]
+    },
+    "CorrespondenceLetter": {
+      "title": "CorrespondenceLetter",
+      "description": "Official outgoing/incoming administrative correspondence.",
+      "type": "object",
+      "properties": {
+        "referenceNumber": { "type": "string" },
+        "direction": { "type": "string" },
+        "letterType": { "type": "string" },
+        "subject": { "type": "string" },
+        "summary": { "type": "string" },
+        "senderEntity": { "type": "string" },
+        "recipientEntity": { "type": "string" },
+        "gregorianDate": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["referenceNumber", "direction", "subject", "createdAt", "updatedAt"]
+    },
+    "MofaVisaRequest": {
+      "title": "MofaVisaRequest",
+      "description": "MOFA diplomatic/INGO visa memo, humanitarian flight manifest, or passport dispatch.",
+      "type": "object",
+      "properties": {
+        "memoNumber": { "type": "string" },
+        "memoDate": { "type": "string" },
+        "organization": { "type": "string" },
+        "requestType": { "type": "string" },
+        "flightRoute": { "type": "string" },
+        "dispatchCompany": { "type": "string" },
+        "beneficiariesSummary": { "type": "string" },
+        "beneficiariesCount": { "type": "integer" },
+        "approvalStatus": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["memoNumber", "organization", "requestType", "approvalStatus", "createdAt", "updatedAt"]
+    },
+    "PortOfficer": {
+      "title": "PortOfficer",
+      "description": "Border port officer assignment and RBAC role record.",
+      "type": "object",
+      "properties": {
+        "rank": { "type": "string" },
+        "fullName": { "type": "string" },
+        "assignedPort": { "type": "string" },
+        "role": { "type": "string" },
+        "dutyOfficer": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["rank", "fullName", "assignedPort", "role", "createdAt", "updatedAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable officer action audit trail.",
+      "type": "object",
+      "properties": {
+        "action": { "type": "string" },
+        "entityType": { "type": "string" },
+        "entityId": { "type": "string" },
+        "details": { "type": "string" },
+        "officerName": { "type": "string" },
+        "officerRole": { "type": "string" },
+        "portName": { "type": "string" },
+        "timestampIso": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["action", "entityType", "details", "officerName", "officerRole", "createdAt"]
+    },
+    "LearnedPattern": {
+      "title": "LearnedPattern",
+      "description": "Learned smart import column signature and routing rule.",
+      "type": "object",
+      "properties": {
+        "patternType": { "type": "string" },
+        "instructionText": { "type": "string" },
+        "keywordsCsv": { "type": "string" },
+        "targetCategory": { "type": "string" },
+        "frequency": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["patternType", "instructionText", "targetCategory", "createdAt", "updatedAt"]
+    },
+    "OfficerProfileSettings": {
+      "title": "OfficerProfileSettings",
+      "description": "User workspace preferences: active officer role, port, and HQ settings.",
+      "type": "object",
+      "properties": {
+        "officerName": { "type": "string" },
+        "officerRole": { "type": "string" },
+        "assignedPort": { "type": "string" },
+        "biometricEnabled": { "type": "boolean" },
+        "highContrastMode": { "type": "boolean" },
+        "hqCenterName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["officerName", "officerRole", "assignedPort", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/travelers/{travelerId}": {
+      "schema": { "$ref": "#/entities/Traveler" },
+      "description": "User-scoped traveler and visa records."
+    },
+    "/users/{userId}/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/SecurityReport" },
+      "description": "User-scoped watchlist and security reports."
+    },
+    "/users/{userId}/movements/{movementId}": {
+      "schema": { "$ref": "#/entities/PatrolMovement" },
+      "description": "User-scoped patrol movements."
+    },
+    "/users/{userId}/seizures/{seizureId}": {
+      "schema": { "$ref": "#/entities/PassportSeizure" },
+      "description": "User-scoped passport seizures."
+    },
+    "/users/{userId}/migrants/{migrantId}": {
+      "schema": { "$ref": "#/entities/UndocumentedMigrant" },
+      "description": "User-scoped undocumented migrants."
+    },
+    "/users/{userId}/refugees/{refugeeId}": {
+      "schema": { "$ref": "#/entities/RefugeeRecord" },
+      "description": "User-scoped refugee records."
+    },
+    "/users/{userId}/foreigners/{foreignerId}": {
+      "schema": { "$ref": "#/entities/ForeignerResident" },
+      "description": "User-scoped foreigner residents."
+    },
+    "/users/{userId}/permits/{permitId}": {
+      "schema": { "$ref": "#/entities/MovementPermit" },
+      "description": "User-scoped internal movement permits."
+    },
+    "/users/{userId}/citizenship_cases/{caseId}": {
+      "schema": { "$ref": "#/entities/CitizenshipCase" },
+      "description": "User-scoped citizenship and marriage cases."
+    },
+    "/users/{userId}/companies/{companyId}": {
+      "schema": { "$ref": "#/entities/TravelAgency" },
+      "description": "User-scoped travel agencies and monitored companies."
+    },
+    "/users/{userId}/correspondence/{letterId}": {
+      "schema": { "$ref": "#/entities/CorrespondenceLetter" },
+      "description": "User-scoped official correspondence letters."
+    },
+    "/users/{userId}/mofa_visas/{memoId}": {
+      "schema": { "$ref": "#/entities/MofaVisaRequest" },
+      "description": "User-scoped MOFA memos and flight manifests."
+    },
+    "/users/{userId}/officers/{officerId}": {
+      "schema": { "$ref": "#/entities/PortOfficer" },
+      "description": "User-scoped border port officers."
+    },
+    "/users/{userId}/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Immutable user-scoped audit log entries."
+    },
+    "/users/{userId}/learned_patterns/{patternId}": {
+      "schema": { "$ref": "#/entities/LearnedPattern" },
+      "description": "User-scoped learned document import routing patterns."
+    },
+    "/users/{userId}/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/OfficerProfileSettings" },
+      "description": "User-scoped officer workspace settings."
+    }
+  }
+}

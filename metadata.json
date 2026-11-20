@@ -1,0 +1,10 @@
+{
+  "name": "نظام المنافذ والجوازات",
+  "description": "نظام متكامل للمعاينة على المسافرين، جوازات السفر، المطلوبين أمنياً، وبلاغات الضبط والمنافذ الحدودية اليمنية.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

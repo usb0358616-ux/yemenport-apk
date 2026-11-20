@@ -1,0 +1,526 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOptStr(data, field, maxLen) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isOptInt(data, field, minVal, maxVal) {
+      return !(field in data) || (data[field] is int && data[field] >= minVal && data[field] <= maxVal);
+    }
+
+    function isOptBool(data, field) {
+      return !(field in data) || data[field] is bool;
+    }
+
+    function hasValidCreateTimestamps(data) {
+      return data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function hasValidUpdateTimestamps(data) {
+      return data.createdAt == existing().createdAt &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    // 1. Travelers
+    function isValidTraveler(data) {
+      return data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 200 &&
+             data.idNumber is string && data.idNumber.size() <= 80 &&
+             data.travelAllowed in ['نعم', 'لا'] &&
+             data.status is string && data.status.size() >= 1 && data.status.size() <= 60 &&
+             isOptStr(data, 'serialNumber', 40) &&
+             isOptStr(data, 'firstName', 60) &&
+             isOptStr(data, 'secondName', 60) &&
+             isOptStr(data, 'thirdName', 60) &&
+             isOptStr(data, 'fourthName', 60) &&
+             isOptStr(data, 'lastName', 60) &&
+             isOptStr(data, 'passportName', 200) &&
+             isOptStr(data, 'idType', 60) &&
+             isOptStr(data, 'passportStatus', 60) &&
+             isOptStr(data, 'nationalId', 60) &&
+             isOptStr(data, 'gender', 30) &&
+             isOptStr(data, 'birthDate', 40) &&
+             isOptInt(data, 'age', 0, 150) &&
+             isOptStr(data, 'country', 100) &&
+             isOptStr(data, 'governorate', 100) &&
+             isOptStr(data, 'profession', 120) &&
+             isOptStr(data, 'phone', 40) &&
+             isOptStr(data, 'center', 150) &&
+             isOptStr(data, 'portName', 150) &&
+             isOptStr(data, 'agency', 150) &&
+             isOptStr(data, 'agencyId', 128) &&
+             isOptStr(data, 'visaType', 100) &&
+             isOptStr(data, 'destination', 120) &&
+             isOptStr(data, 'visitReason', 200) &&
+             isOptStr(data, 'receiveDate', 40) &&
+             isOptStr(data, 'exitDate', 40) &&
+             isOptStr(data, 'issueDate', 40) &&
+             isOptStr(data, 'expiryDate', 40) &&
+             isOptStr(data, 'placeOfIssue', 120) &&
+             isOptStr(data, 'requestNumber', 80) &&
+             isOptStr(data, 'returnReason', 300) &&
+             isOptStr(data, 'vettingResult', 200) &&
+             isOptStr(data, 'investigatingOfficer', 150) &&
+             isOptStr(data, 'additionalInfo', 1000) &&
+             isOptStr(data, 'mergeHistory', 2000);
+    }
+
+    match /users/{userId}/travelers/{travelerId} {
+      allow get: if isOwner(userId) && isValidId(travelerId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(travelerId) &&
+                       incoming().keys().hasAll(['fullName', 'idNumber', 'travelAllowed', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly([
+                         'serialNumber', 'firstName', 'secondName', 'thirdName', 'fourthName', 'lastName',
+                         'fullName', 'passportName', 'idNumber', 'idType', 'passportStatus', 'nationalId',
+                         'gender', 'birthDate', 'age', 'country', 'governorate', 'profession', 'phone',
+                         'center', 'portName', 'agency', 'agencyId', 'visaType', 'destination', 'visitReason',
+                         'receiveDate', 'exitDate', 'issueDate', 'expiryDate', 'placeOfIssue', 'requestNumber',
+                         'returnReason', 'vettingResult', 'travelAllowed', 'status', 'investigatingOfficer',
+                         'additionalInfo', 'mergeHistory', 'createdAt', 'updatedAt'
+                       ]) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidTraveler(incoming());
+      allow update: if isOwner(userId) && isValidId(travelerId) &&
+                       isValidTraveler(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'serialNumber', 'firstName', 'secondName', 'thirdName', 'fourthName', 'lastName',
+                         'fullName', 'passportName', 'idNumber', 'idType', 'passportStatus', 'nationalId',
+                         'gender', 'birthDate', 'age', 'country', 'governorate', 'profession', 'phone',
+                         'center', 'portName', 'agency', 'agencyId', 'visaType', 'destination', 'visitReason',
+                         'receiveDate', 'exitDate', 'issueDate', 'expiryDate', 'placeOfIssue', 'requestNumber',
+                         'returnReason', 'vettingResult', 'travelAllowed', 'status', 'investigatingOfficer',
+                         'additionalInfo', 'mergeHistory', 'updatedAt'
+                       ]);
+      allow delete: if isOwner(userId) && isValidId(travelerId);
+    }
+
+    // 2. Security Reports
+    function isValidReport(data) {
+      return data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+             data.targetName is string && data.targetName.size() <= 200 &&
+             data.status is string && data.status.size() >= 1 && data.status.size() <= 60 &&
+             isOptStr(data, 'targetPassportNumber', 80) &&
+             isOptStr(data, 'reportType', 80) &&
+             isOptStr(data, 'severity', 40) &&
+             isOptStr(data, 'description', 2000) &&
+             isOptStr(data, 'assignedPort', 150) &&
+             isOptStr(data, 'officerName', 150);
+    }
+
+    match /users/{userId}/reports/{reportId} {
+      allow get: if isOwner(userId) && isValidId(reportId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(reportId) &&
+                       incoming().keys().hasAll(['title', 'targetName', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['title', 'targetName', 'targetPassportNumber', 'reportType', 'severity', 'description', 'assignedPort', 'officerName', 'status', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidReport(incoming());
+      allow update: if isOwner(userId) && isValidId(reportId) &&
+                       isValidReport(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['title', 'targetName', 'targetPassportNumber', 'reportType', 'severity', 'description', 'assignedPort', 'officerName', 'status', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(reportId);
+    }
+
+    // 3. Patrol Movements
+    function isValidMovement(data) {
+      return data.vehicleType is string && data.vehicleType.size() >= 1 && data.vehicleType.size() <= 60 &&
+             data.plateNumber is string && data.plateNumber.size() >= 1 && data.plateNumber.size() <= 60 &&
+             data.driverName is string && data.driverName.size() >= 1 && data.driverName.size() <= 150 &&
+             data.status is string && data.status.size() >= 1 && data.status.size() <= 60 &&
+             isOptStr(data, 'portName', 150) &&
+             isOptStr(data, 'mission', 400) &&
+             isOptStr(data, 'departureTime', 60) &&
+             isOptStr(data, 'expectedReturnTime', 60) &&
+             isOptStr(data, 'actualReturnTime', 60) &&
+             isOptStr(data, 'outcomeNotes', 500);
+    }
+
+    match /users/{userId}/movements/{movementId} {
+      allow get: if isOwner(userId) && isValidId(movementId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(movementId) &&
+                       incoming().keys().hasAll(['vehicleType', 'plateNumber', 'driverName', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['vehicleType', 'plateNumber', 'driverName', 'portName', 'mission', 'departureTime', 'expectedReturnTime', 'actualReturnTime', 'outcomeNotes', 'status', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidMovement(incoming());
+      allow update: if isOwner(userId) && isValidId(movementId) &&
+                       isValidMovement(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['vehicleType', 'plateNumber', 'driverName', 'portName', 'mission', 'departureTime', 'expectedReturnTime', 'actualReturnTime', 'outcomeNotes', 'status', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(movementId);
+    }
+
+    // 4. Passport Seizures
+    function isValidSeizure(data) {
+      return data.recordNumber is string && data.recordNumber.size() >= 1 && data.recordNumber.size() <= 80 &&
+             data.travelerName is string && data.travelerName.size() >= 1 && data.travelerName.size() <= 200 &&
+             data.passportNumber is string && data.passportNumber.size() <= 80 &&
+             data.status is string && data.status.size() >= 1 && data.status.size() <= 60 &&
+             isOptStr(data, 'nationality', 100) &&
+             isOptStr(data, 'seizurePort', 150) &&
+             isOptStr(data, 'seizureDate', 40) &&
+             isOptStr(data, 'reason', 400) &&
+             isOptStr(data, 'recipientName', 150) &&
+             isOptStr(data, 'deliveredAt', 60);
+    }
+
+    match /users/{userId}/seizures/{seizureId} {
+      allow get: if isOwner(userId) && isValidId(seizureId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(seizureId) &&
+                       incoming().keys().hasAll(['recordNumber', 'travelerName', 'passportNumber', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['recordNumber', 'travelerName', 'passportNumber', 'nationality', 'seizurePort', 'seizureDate', 'reason', 'status', 'recipientName', 'deliveredAt', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidSeizure(incoming());
+      allow update: if isOwner(userId) && isValidId(seizureId) &&
+                       isValidSeizure(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['recordNumber', 'travelerName', 'passportNumber', 'nationality', 'seizurePort', 'seizureDate', 'reason', 'status', 'recipientName', 'deliveredAt', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(seizureId);
+    }
+
+    // 5. Undocumented Migrants
+    function isValidMigrant(data) {
+      return data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 200 &&
+             data.nationality is string && data.nationality.size() >= 1 && data.nationality.size() <= 100 &&
+             data.status is string && data.status.size() >= 1 && data.status.size() <= 80 &&
+             isOptStr(data, 'apprehensionPort', 150) &&
+             isOptStr(data, 'apprehensionDate', 40) &&
+             isOptStr(data, 'medicalStatus', 120) &&
+             isOptStr(data, 'shelterLocation', 200);
+    }
+
+    match /users/{userId}/migrants/{migrantId} {
+      allow get: if isOwner(userId) && isValidId(migrantId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(migrantId) &&
+                       incoming().keys().hasAll(['fullName', 'nationality', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['fullName', 'nationality', 'apprehensionPort', 'apprehensionDate', 'medicalStatus', 'shelterLocation', 'status', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidMigrant(incoming());
+      allow update: if isOwner(userId) && isValidId(migrantId) &&
+                       isValidMigrant(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'nationality', 'apprehensionPort', 'apprehensionDate', 'medicalStatus', 'shelterLocation', 'status', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(migrantId);
+    }
+
+    // 6. Refugees
+    function isValidRefugee(data) {
+      return data.unhcrNumber is string && data.unhcrNumber.size() >= 1 && data.unhcrNumber.size() <= 80 &&
+             data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 200 &&
+             data.vettingStatus is string && data.vettingStatus.size() >= 1 && data.vettingStatus.size() <= 80 &&
+             isOptStr(data, 'nationality', 100) &&
+             isOptStr(data, 'campOrCity', 150) &&
+             isOptStr(data, 'permitExpiryDate', 40);
+    }
+
+    match /users/{userId}/refugees/{refugeeId} {
+      allow get: if isOwner(userId) && isValidId(refugeeId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(refugeeId) &&
+                       incoming().keys().hasAll(['unhcrNumber', 'fullName', 'vettingStatus', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['unhcrNumber', 'fullName', 'nationality', 'campOrCity', 'vettingStatus', 'permitExpiryDate', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidRefugee(incoming());
+      allow update: if isOwner(userId) && isValidId(refugeeId) &&
+                       isValidRefugee(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['unhcrNumber', 'fullName', 'nationality', 'campOrCity', 'vettingStatus', 'permitExpiryDate', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(refugeeId);
+    }
+
+    // 7. Foreigner Residents
+    function isValidForeigner(data) {
+      return data.residenceNumber is string && data.residenceNumber.size() >= 1 && data.residenceNumber.size() <= 80 &&
+             data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 200 &&
+             data.passportNumber is string && data.passportNumber.size() <= 80 &&
+             isOptStr(data, 'nationality', 100) &&
+             isOptStr(data, 'employer', 200) &&
+             isOptStr(data, 'profession', 120) &&
+             isOptStr(data, 'entryDate', 40) &&
+             isOptStr(data, 'residenceExpiryDate', 40) &&
+             isOptStr(data, 'medicalClearance', 100);
+    }
+
+    match /users/{userId}/foreigners/{foreignerId} {
+      allow get: if isOwner(userId) && isValidId(foreignerId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(foreignerId) &&
+                       incoming().keys().hasAll(['residenceNumber', 'fullName', 'passportNumber', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['residenceNumber', 'fullName', 'passportNumber', 'nationality', 'employer', 'profession', 'entryDate', 'residenceExpiryDate', 'medicalClearance', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidForeigner(incoming());
+      allow update: if isOwner(userId) && isValidId(foreignerId) &&
+                       isValidForeigner(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['residenceNumber', 'fullName', 'passportNumber', 'nationality', 'employer', 'profession', 'entryDate', 'residenceExpiryDate', 'medicalClearance', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(foreignerId);
+    }
+
+    // 8. Internal Movement Permits
+    function isValidPermit(data) {
+      return data.permitCode is string && data.permitCode.size() >= 1 && data.permitCode.size() <= 80 &&
+             data.delegationName is string && data.delegationName.size() >= 1 && data.delegationName.size() <= 200 &&
+             data.approvalStatus is string && data.approvalStatus.size() >= 1 && data.approvalStatus.size() <= 80 &&
+             isOptStr(data, 'authorizedRoute', 300) &&
+             isOptStr(data, 'accommodationPlace', 200) &&
+             isOptStr(data, 'vehicleDetails', 300) &&
+             isOptStr(data, 'passengersList', 2000) &&
+             isOptInt(data, 'passengersCount', 1, 5000) &&
+             isOptStr(data, 'validFrom', 40) &&
+             isOptStr(data, 'validTo', 40);
+    }
+
+    match /users/{userId}/permits/{permitId} {
+      allow get: if isOwner(userId) && isValidId(permitId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(permitId) &&
+                       incoming().keys().hasAll(['permitCode', 'delegationName', 'approvalStatus', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['permitCode', 'delegationName', 'authorizedRoute', 'accommodationPlace', 'vehicleDetails', 'passengersList', 'passengersCount', 'validFrom', 'validTo', 'approvalStatus', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidPermit(incoming());
+      allow update: if isOwner(userId) && isValidId(permitId) &&
+                       isValidPermit(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['permitCode', 'delegationName', 'authorizedRoute', 'accommodationPlace', 'vehicleDetails', 'passengersList', 'passengersCount', 'validFrom', 'validTo', 'approvalStatus', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(permitId);
+    }
+
+    // 9. Citizenship & Legal Cases
+    function isValidCitizenshipCase(data) {
+      return data.caseNumber is string && data.caseNumber.size() >= 1 && data.caseNumber.size() <= 80 &&
+             data.serviceType is string && data.serviceType.size() >= 1 && data.serviceType.size() <= 150 &&
+             data.applicantName is string && data.applicantName.size() >= 1 && data.applicantName.size() <= 200 &&
+             data.status is string && data.status.size() >= 1 && data.status.size() <= 80 &&
+             isOptStr(data, 'spouseOrBeneficiaryName', 200) &&
+             isOptStr(data, 'spouseNationality', 100) &&
+             isOptStr(data, 'submissionDate', 40) &&
+             isOptInt(data, 'slaDaysTarget', 1, 3650);
+    }
+
+    match /users/{userId}/citizenship_cases/{caseId} {
+      allow get: if isOwner(userId) && isValidId(caseId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(caseId) &&
+                       incoming().keys().hasAll(['caseNumber', 'serviceType', 'applicantName', 'status', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['caseNumber', 'serviceType', 'applicantName', 'spouseOrBeneficiaryName', 'spouseNationality', 'submissionDate', 'slaDaysTarget', 'status', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidCitizenshipCase(incoming());
+      allow update: if isOwner(userId) && isValidId(caseId) &&
+                       isValidCitizenshipCase(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['caseNumber', 'serviceType', 'applicantName', 'spouseOrBeneficiaryName', 'spouseNationality', 'submissionDate', 'slaDaysTarget', 'status', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(caseId);
+    }
+
+    // 10. Monitored Companies & Travel Agencies
+    function isValidCompany(data) {
+      return data.agencyName is string && data.agencyName.size() >= 1 && data.agencyName.size() <= 200 &&
+             data.clearanceStatus is string && data.clearanceStatus.size() >= 1 && data.clearanceStatus.size() <= 80 &&
+             isOptStr(data, 'companyType', 100) &&
+             isOptStr(data, 'governorate', 100) &&
+             isOptStr(data, 'center', 150) &&
+             isOptInt(data, 'linkedVisasCount', 0, 1000000) &&
+             isOptInt(data, 'issuedCount', 0, 1000000) &&
+             isOptInt(data, 'returnedCount', 0, 1000000);
+    }
+
+    match /users/{userId}/companies/{companyId} {
+      allow get: if isOwner(userId) && isValidId(companyId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(companyId) &&
+                       incoming().keys().hasAll(['agencyName', 'clearanceStatus', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['agencyName', 'companyType', 'governorate', 'center', 'clearanceStatus', 'linkedVisasCount', 'issuedCount', 'returnedCount', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidCompany(incoming());
+      allow update: if isOwner(userId) && isValidId(companyId) &&
+                       isValidCompany(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['agencyName', 'companyType', 'governorate', 'center', 'clearanceStatus', 'linkedVisasCount', 'issuedCount', 'returnedCount', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(companyId);
+    }
+
+    // 11. Correspondence Letters
+    function isValidCorrespondence(data) {
+      return data.referenceNumber is string && data.referenceNumber.size() >= 1 && data.referenceNumber.size() <= 80 &&
+             data.direction is string && data.direction.size() >= 1 && data.direction.size() <= 40 &&
+             data.subject is string && data.subject.size() >= 1 && data.subject.size() <= 300 &&
+             isOptStr(data, 'letterType', 100) &&
+             isOptStr(data, 'summary', 2000) &&
+             isOptStr(data, 'senderEntity', 200) &&
+             isOptStr(data, 'recipientEntity', 200) &&
+             isOptStr(data, 'gregorianDate', 40);
+    }
+
+    match /users/{userId}/correspondence/{letterId} {
+      allow get: if isOwner(userId) && isValidId(letterId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(letterId) &&
+                       incoming().keys().hasAll(['referenceNumber', 'direction', 'subject', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['referenceNumber', 'direction', 'letterType', 'subject', 'summary', 'senderEntity', 'recipientEntity', 'gregorianDate', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidCorrespondence(incoming());
+      allow update: if isOwner(userId) && isValidId(letterId) &&
+                       isValidCorrespondence(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['referenceNumber', 'direction', 'letterType', 'subject', 'summary', 'senderEntity', 'recipientEntity', 'gregorianDate', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(letterId);
+    }
+
+    // 12. MOFA Visas & Flight Manifests
+    function isValidMofaVisa(data) {
+      return data.memoNumber is string && data.memoNumber.size() >= 1 && data.memoNumber.size() <= 80 &&
+             data.organization is string && data.organization.size() >= 1 && data.organization.size() <= 200 &&
+             data.requestType is string && data.requestType.size() >= 1 && data.requestType.size() <= 100 &&
+             data.approvalStatus is string && data.approvalStatus.size() >= 1 && data.approvalStatus.size() <= 80 &&
+             isOptStr(data, 'memoDate', 40) &&
+             isOptStr(data, 'flightRoute', 200) &&
+             isOptStr(data, 'dispatchCompany', 150) &&
+             isOptStr(data, 'beneficiariesSummary', 2000) &&
+             isOptInt(data, 'beneficiariesCount', 0, 10000);
+    }
+
+    match /users/{userId}/mofa_visas/{memoId} {
+      allow get: if isOwner(userId) && isValidId(memoId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(memoId) &&
+                       incoming().keys().hasAll(['memoNumber', 'organization', 'requestType', 'approvalStatus', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['memoNumber', 'memoDate', 'organization', 'requestType', 'flightRoute', 'dispatchCompany', 'beneficiariesSummary', 'beneficiariesCount', 'approvalStatus', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidMofaVisa(incoming());
+      allow update: if isOwner(userId) && isValidId(memoId) &&
+                       isValidMofaVisa(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['memoNumber', 'memoDate', 'organization', 'requestType', 'flightRoute', 'dispatchCompany', 'beneficiariesSummary', 'beneficiariesCount', 'approvalStatus', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(memoId);
+    }
+
+    // 13. Port Officers
+    function isValidPortOfficer(data) {
+      return data.rank is string && data.rank.size() >= 1 && data.rank.size() <= 80 &&
+             data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 200 &&
+             data.assignedPort is string && data.assignedPort.size() >= 1 && data.assignedPort.size() <= 150 &&
+             data.role is string && data.role.size() >= 1 && data.role.size() <= 80 &&
+             isOptBool(data, 'dutyOfficer');
+    }
+
+    match /users/{userId}/officers/{officerId} {
+      allow get: if isOwner(userId) && isValidId(officerId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(officerId) &&
+                       incoming().keys().hasAll(['rank', 'fullName', 'assignedPort', 'role', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['rank', 'fullName', 'assignedPort', 'role', 'dutyOfficer', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidPortOfficer(incoming());
+      allow update: if isOwner(userId) && isValidId(officerId) &&
+                       isValidPortOfficer(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['rank', 'fullName', 'assignedPort', 'role', 'dutyOfficer', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(officerId);
+    }
+
+    // 14. Immutable Audit Logs
+    function isValidAuditLog(data) {
+      return data.action is string && data.action.size() >= 1 && data.action.size() <= 100 &&
+             data.entityType is string && data.entityType.size() >= 1 && data.entityType.size() <= 100 &&
+             data.details is string && data.details.size() >= 1 && data.details.size() <= 1000 &&
+             data.officerName is string && data.officerName.size() >= 1 && data.officerName.size() <= 150 &&
+             data.officerRole is string && data.officerRole.size() >= 1 && data.officerRole.size() <= 80 &&
+             isOptStr(data, 'entityId', 128) &&
+             isOptStr(data, 'portName', 150) &&
+             isOptStr(data, 'timestampIso', 60) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    match /users/{userId}/audit_logs/{logId} {
+      allow get: if isOwner(userId) && isValidId(logId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(logId) &&
+                       incoming().keys().hasAll(['action', 'entityType', 'details', 'officerName', 'officerRole', 'createdAt']) &&
+                       incoming().keys().hasOnly(['action', 'entityType', 'entityId', 'details', 'officerName', 'officerRole', 'portName', 'timestampIso', 'createdAt']) &&
+                       isValidAuditLog(incoming());
+      allow update, delete: if false;
+    }
+
+    // 15. Learned Patterns
+    function isValidLearnedPattern(data) {
+      return data.patternType is string && data.patternType.size() >= 1 && data.patternType.size() <= 80 &&
+             data.instructionText is string && data.instructionText.size() >= 1 && data.instructionText.size() <= 500 &&
+             data.targetCategory is string && data.targetCategory.size() >= 1 && data.targetCategory.size() <= 150 &&
+             isOptStr(data, 'keywordsCsv', 500) &&
+             isOptInt(data, 'frequency', 1, 1000000);
+    }
+
+    match /users/{userId}/learned_patterns/{patternId} {
+      allow get: if isOwner(userId) && isValidId(patternId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(patternId) &&
+                       incoming().keys().hasAll(['patternType', 'instructionText', 'targetCategory', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['patternType', 'instructionText', 'keywordsCsv', 'targetCategory', 'frequency', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidLearnedPattern(incoming());
+      allow update: if isOwner(userId) && isValidId(patternId) &&
+                       isValidLearnedPattern(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['patternType', 'instructionText', 'keywordsCsv', 'targetCategory', 'frequency', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(patternId);
+    }
+
+    // 16. Officer Profile Settings
+    function isValidSettings(data) {
+      return data.officerName is string && data.officerName.size() >= 1 && data.officerName.size() <= 150 &&
+             data.officerRole is string && data.officerRole.size() >= 1 && data.officerRole.size() <= 80 &&
+             data.assignedPort is string && data.assignedPort.size() >= 1 && data.assignedPort.size() <= 150 &&
+             isOptBool(data, 'biometricEnabled') &&
+             isOptBool(data, 'highContrastMode') &&
+             isOptStr(data, 'hqCenterName', 200);
+    }
+
+    match /users/{userId}/settings/{settingId} {
+      allow get: if isOwner(userId) && isValidId(settingId);
+      allow list: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(settingId) &&
+                       incoming().keys().hasAll(['officerName', 'officerRole', 'assignedPort', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['officerName', 'officerRole', 'assignedPort', 'biometricEnabled', 'highContrastMode', 'hqCenterName', 'createdAt', 'updatedAt']) &&
+                       hasValidCreateTimestamps(incoming()) &&
+                       isValidSettings(incoming());
+      allow update: if isOwner(userId) && isValidId(settingId) &&
+                       isValidSettings(incoming()) &&
+                       hasValidUpdateTimestamps(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['officerName', 'officerRole', 'assignedPort', 'biometricEnabled', 'highContrastMode', 'hqCenterName', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(settingId);
+    }
+  }
+}
